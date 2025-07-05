@@ -3,9 +3,13 @@
 ```bash
 sudo bash -c "$(curl -sL https://raw.githubusercontent.com/Lanlan13-14/UFW-Easy/refs/heads/main/ufw_easy.sh)"
 ```
-已安装过？执行
+### 已安装过？执行
 ```
 sudo ufw-easy.sh
+```
+##### 卸载
+```
+sudo bash -c "$(curl -sL https://raw.githubusercontent.com/Lanlan13-14/UFW-Easy/refs/heads/main/uninstall.sh)"
 ```
 
 ### 2. 添加规则
