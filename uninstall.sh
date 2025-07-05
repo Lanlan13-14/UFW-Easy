@@ -1,8 +1,10 @@
 #!/bin/bash
 
 # UFW 防火墙管理工具卸载脚本
-# 版本: 2.0
-# 特点: 卸载后询问是否重启系统
+# 版本: 3.0
+# 特点: 
+#   - 卸载后询问是否重启系统
+#   - 新增完全删除UFW及所有规则选项
 
 # 检查 root 权限
 if [ "$(id -u)" -ne 0 ]; then
@@ -16,9 +18,10 @@ echo "      UFW 防火墙管理工具卸载程序"
 echo "============================================="
 echo " 1. 仅卸载管理工具 (保留防火墙规则)"
 echo " 2. 完全卸载 (删除工具并重置防火墙)"
-echo " 3. 取消卸载"
+echo " 3. 完全删除UFW及所有规则 (包括软件包)"
+echo " 4. 取消卸载"
 echo "============================================="
-echo -n "请选择卸载选项 [1-3]: "
+echo -n "请选择卸载选项 [1-4]: "
 read option
 
 case $option in
@@ -26,10 +29,10 @@ case $option in
         echo "🔧 正在仅卸载管理工具..."
         # 删除主程序
         rm -f /usr/local/bin/ufw-easy
-        
+
         # 删除配置文件
         rm -f /etc/ufw-easy.conf 2>/dev/null
-        
+
         echo "✅ 管理工具已卸载"
         echo "ℹ️ 防火墙规则和UFW程序仍然保留"
         ;;
@@ -37,24 +40,63 @@ case $option in
         echo "⚠️ 正在完全卸载工具并重置防火墙..."
         # 删除主程序
         rm -f /usr/local/bin/ufw-easy
-        
+
         # 删除配置文件
         rm -f /etc/ufw-easy.conf 2>/dev/null
-        
+
         # 重置防火墙
         ufw --force reset
         ufw disable
-        
+
         # 删除端口转发规则
         iptables -t nat -F
         iptables -t mangle -F
         iptables -F
         iptables -X
-        iptables-save > /etc/iptables/rules.v4
         
+        # 保存空规则
+        if [ -d "/etc/iptables" ]; then
+            iptables-save > /etc/iptables/rules.v4
+        fi
+
         echo "✅ 工具已完全卸载，防火墙已重置"
+        echo "ℹ️ UFW软件包仍然保留在系统中"
         ;;
     3)
+        echo "⚠️ 正在完全删除UFW及所有规则..."
+        # 删除主程序
+        rm -f /usr/local/bin/ufw-easy
+
+        # 删除配置文件
+        rm -f /etc/ufw-easy.conf 2>/dev/null
+
+        # 重置防火墙
+        ufw --force reset
+        ufw disable
+
+        # 删除端口转发规则
+        iptables -t nat -F
+        iptables -t mangle -F
+        iptables -F
+        iptables -X
+        
+        # 保存空规则
+        if [ -d "/etc/iptables" ]; then
+            iptables-save > /etc/iptables/rules.v4
+        fi
+        
+        # 卸载UFW软件包
+        if command -v ufw &> /dev/null; then
+            apt-get remove --purge -y ufw
+            apt-get autoremove -y
+            echo "✅ UFW软件包已完全卸载"
+        else
+            echo "ℹ️ UFW软件包未安装，无需卸载"
+        fi
+        
+        echo "✅ UFW及所有相关规则已完全删除"
+        ;;
+    4)
         echo "❌ 卸载已取消"
         exit 0
         ;;
