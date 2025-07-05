@@ -2,13 +2,21 @@
 
 # ===========================================================
 # 增强版 UFW 防火墙管理工具
-# 版本: 5.0
+# 版本: 4.3
 # 项目地址: https://github.com/Lanlan13-14/UFW-Easy
+# 特点: 
+#   - 自动安装 UFW 但不自动启用
+#   - 所有规则变更需手动重载才生效
+#   - 规则自动优先于默认拒绝策略
+#   - 支持更新脚本功能
+#   - 支持 TCP/UDP 协议选择
 # ===========================================================
 
+# 项目信息
 GITHUB_REPO="https://github.com/Lanlan13-14/UFW-Easy"
 SCRIPT_URL="https://raw.githubusercontent.com/Lanlan13-14/UFW-Easy/main/ufw_easy.sh"
 
+# 检查 root 权限
 check_root() {
     if [ "$(id -u)" -ne 0 ]; then
         echo "❌ 请使用 sudo 或以 root 用户运行此脚本"
@@ -16,17 +24,20 @@ check_root() {
     fi
 }
 
+# 安装 UFW（如果未安装）
 install_ufw() {
     if ! command -v ufw &> /dev/null; then
         echo "🔧 安装 UFW 防火墙..."
         apt update
         apt install -y ufw
         echo "✅ UFW 已安装"
+        # 初始禁用 UFW
         ufw disable >/dev/null 2>&1
         echo "⚠️ UFW 已禁用（等待手动启用）"
     fi
 }
 
+# 显示主菜单
 show_menu() {
     clear
     echo "====================================================="
@@ -53,6 +64,7 @@ show_menu() {
     echo -n "请选择操作 [0-10]: "
 }
 
+# 显示防火墙状态和规则
 show_status() {
     clear
     echo "==================== 防火墙状态 ===================="
@@ -64,36 +76,41 @@ show_status() {
     read -n 1 -s -r -p "按任意键返回主菜单..."
 }
 
+# 添加规则（确保规则优先于默认拒绝策略）
 add_rule() {
     local rule="$1"
+    # 使用 insert 1 确保规则在默认策略之前
     if ! ufw insert 1 $rule; then
+        # 如果插入失败（可能因为第一条规则已存在），则追加规则
         ufw $rule
     fi
     echo "✅ 规则已添加: $rule"
     echo "⚠️ 注意: 规则将在重载防火墙后生效"
 }
 
-# 修正版 select_protocol，强制输入有效选项
+# 选择协议
 select_protocol() {
     echo ""
     echo "==================== 协议选择 ===================="
-    echo " 1. TCP"
-    echo " 2. UDP"
-    echo " 3. TCP+UDP"
+    echo " 1) TCP"
+    echo " 2) UDP"
+    echo " 3) TCP+UDP"
     echo "================================================="
-    while true; do
-        read -p "请选择协议 [1-3]: " protocol_choice
-        case $protocol_choice in
-            1) echo "tcp"; return ;;
-            2) echo "udp"; return ;;
-            3) echo "any"; return ;;
-            *)
-                echo "⚠️ 无效选择，请重新输入 [1-3]"
-                ;;
-        esac
-    done
+    echo -n "请选择协议 [1-3]: "
+    read protocol_choice
+    
+    case $protocol_choice in
+        1) echo "tcp" ;;
+        2) echo "udp" ;;
+        3) echo "any" ;;
+        *) 
+            echo "⚠️ 无效选择，使用默认值: TCP+UDP"
+            echo "any"
+            ;;
+    esac
 }
 
+# 添加简单规则
 add_simple_rule() {
     while true; do
         clear
@@ -109,7 +126,7 @@ add_simple_rule() {
         read choice
 
         case $choice in
-            1)
+            1) # 允许端口
                 echo -n "请输入要允许的端口 (如: 80, 443, 22): "
                 read port
                 if [ -n "$port" ]; then
@@ -124,7 +141,7 @@ add_simple_rule() {
                     echo "❌ 端口不能为空"
                 fi
                 ;;
-            2)
+            2) # 拒绝端口
                 echo -n "请输入要拒绝的端口 (如: 8080, 21): "
                 read port
                 if [ -n "$port" ]; then
@@ -139,7 +156,7 @@ add_simple_rule() {
                     echo "❌ 端口不能为空"
                 fi
                 ;;
-            3)
+            3) # 允许来源IP
                 echo -n "请输入要允许的IP地址 (如: 192.168.1.100): "
                 read ip
                 if [ -n "$ip" ]; then
@@ -148,7 +165,7 @@ add_simple_rule() {
                     echo "❌ IP地址不能为空"
                 fi
                 ;;
-            4)
+            4) # 拒绝来源IP
                 echo -n "请输入要拒绝的IP地址 (如: 10.0.0.5): "
                 read ip
                 if [ -n "$ip" ]; then
@@ -157,7 +174,7 @@ add_simple_rule() {
                     echo "❌ IP地址不能为空"
                 fi
                 ;;
-            5)
+            5) # 允许特定IP访问特定端口
                 echo -n "请输入要允许的IP地址 (如: 192.168.1.100): "
                 read ip
                 echo -n "请输入要允许的端口 (如: 22): "
@@ -183,12 +200,15 @@ add_simple_rule() {
     done
 }
 
+# 添加高级规则
 add_advanced_rule() {
     while true; do
         clear
         echo "==================== 添加高级规则 ===================="
         echo " 1. 允许特定IP访问特定端口范围"
-        echo " 2"
+        echo " 2. 设置限速规则"
+        echo " 3. 允许特定网络接口"
+        echo " 4. 设置特定协议规则"
         echo " 5. 添加应用配置文件规则"
         echo " 6. 返回主菜单"
         echo "-----------------------------------------------------"
@@ -196,7 +216,7 @@ add_advanced_rule() {
         read choice
 
         case $choice in
-            1)
+            1) # 允许特定IP访问特定端口范围
                 echo -n "请输入要允许的IP地址: "
                 read ip
                 echo -n "请输入起始端口: "
@@ -205,6 +225,7 @@ add_advanced_rule() {
                 read end_port
                 echo "请为端口范围 $start_port:$end_port 选择协议:"
                 protocol=$(select_protocol)
+
                 if [ -n "$ip" ] && [ -n "$start_port" ] && [ -n "$end_port" ]; then
                     if [ "$protocol" == "any" ]; then
                         add_rule "allow from $ip to any port $start_port:$end_port"
@@ -215,7 +236,7 @@ add_advanced_rule() {
                     echo "❌ 所有字段都必须填写"
                 fi
                 ;;
-            2)
+            2) # 设置限速规则
                 echo -n "请输入端口: "
                 read port
                 if [ -n "$port" ]; then
@@ -231,11 +252,12 @@ add_advanced_rule() {
                     echo "❌ 端口不能为空"
                 fi
                 ;;
-            3)
+            3) # 允许特定网络接口
                 echo -n "请输入端口: "
                 read port
                 echo -n "请输入网络接口 (如: eth0): "
                 read interface
+
                 if [ -n "$port" ] && [ -n "$interface" ]; then
                     echo "请为端口 $port 选择协议:"
                     protocol=$(select_protocol)
@@ -248,13 +270,14 @@ add_advanced_rule() {
                     echo "❌ 所有字段都必须填写"
                 fi
                 ;;
-            4)
+            4) # 设置特定协议规则
                 echo -n "请输入端口: "
                 read port
                 echo "请为端口 $port 选择协议:"
                 protocol=$(select_protocol)
                 echo -n "允许还是拒绝? (allow/deny): "
                 read action
+
                 if [ -n "$port" ] && [ -n "$action" ]; then
                     if [ "$protocol" == "any" ]; then
                         add_rule "$action $port"
@@ -265,11 +288,12 @@ add_advanced_rule() {
                     echo "❌ 所有字段都必须填写"
                 fi
                 ;;
-            5)
+            5) # 添加应用配置文件规则
                 echo "可用的应用配置文件:"
                 ufw app list
                 echo -n "请输入应用配置文件名: "
                 read app
+
                 if [ -n "$app" ]; then
                     add_rule "allow $app"
                 else
@@ -285,12 +309,16 @@ add_advanced_rule() {
     done
 }
 
+# 删除规则
 delete_rule() {
     clear
     echo "===================== 删除规则 ===================="
     echo "编号 | 规则"
     echo "--------------------------------------------------"
+
+    # 显示带编号的规则列表
     ufw status numbered | grep -v 'Status:' | grep -v 'To' | grep -v '--' | nl -v 0
+
     echo "--------------------------------------------------"
     echo -n "请输入要删除的规则编号 (或 'a' 删除所有规则): "
     read rule_num
@@ -308,6 +336,7 @@ delete_rule() {
             echo "❌ 操作已取消"
         fi
     else
+        # 检查规则是否存在
         if ufw status numbered | grep -q "^\[$rule_num\]"; then
             ufw --force delete "$rule_num"
             echo "✅ 规则 $rule_num 已删除"
@@ -316,10 +345,12 @@ delete_rule() {
             echo "❌ 规则 $rule_num 不存在"
         fi
     fi
+
     echo "---------------------------------------------------"
     read -n 1 -s -r -p "按任意键返回主菜单..."
 }
 
+# 查看应用配置文件
 view_app_profiles() {
     clear
     echo "==================== 应用配置文件 ===================="
@@ -327,14 +358,17 @@ view_app_profiles() {
     ufw app list
     echo -n "输入配置文件名称查看详情 (直接回车返回): "
     read app
+
     if [ -n "$app" ]; then
         echo "---------------------------------------------------"
         ufw app info "$app"
     fi
+
     echo "---------------------------------------------------"
     read -n 1 -s -r -p "按任意键返回主菜单..."
 }
 
+# 端口转发设置
 port_forwarding() {
     clear
     echo "==================== 端口转发设置 ===================="
@@ -347,7 +381,7 @@ port_forwarding() {
     read choice
 
     case $choice in
-        1)
+        1) # 添加端口转发
             echo -n "请输入源端口: "
             read src_port
             echo -n "请输入目标IP: "
@@ -356,27 +390,37 @@ port_forwarding() {
             read dest_port
             echo "请为端口转发选择协议:"
             protocol=$(select_protocol)
+            
+            # 确保协议转换为小写
             protocol=$(echo "$protocol" | tr '[:upper:]' '[:lower:]')
+            
             if [ "$protocol" == "any" ]; then
                 protocol="tcp/udp"
             fi
+
             if [ -n "$src_port" ] && [ -n "$dest_ip" ] && [ -n "$dest_port" ]; then
+                # 启用IP转发
                 sysctl -w net.ipv4.ip_forward=1
                 echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
+
+                # 添加转发规则
                 iptables -t nat -A PREROUTING -p "$protocol" --dport "$src_port" -j DNAT --to-destination "${dest_ip}:${dest_port}"
                 iptables -t nat -A POSTROUTING -p "$protocol" -d "$dest_ip" --dport "$dest_port" -j MASQUERADE
+
+                # 保存规则
                 iptables-save > /etc/iptables/rules.v4
+
                 echo "✅ 端口转发已添加: ${src_port}(${protocol}) -> ${dest_ip}:${dest_port}"
                 echo "⚠️ 注意: 变更将在重载防火墙后生效"
             else
                 echo "❌ 所有字段都必须填写"
             fi
             ;;
-        2)
+        2) # 查看端口转发规则
             echo "当前端口转发规则:"
             iptables -t nat -L PREROUTING -n -v
             ;;
-        3)
+        3) # 删除端口转发规则
             echo "当前端口转发规则:"
             iptables -t nat -L PREROUTING -n -v --line-numbers
             echo -n "请输入要删除的规则编号: "
@@ -391,36 +435,48 @@ port_forwarding() {
             fi
             ;;
         4) return ;;
-        *) echo "❌ 无效 echo "---------------------------------------------------"
+        *) echo "❌ 无效选择" ;;
+    esac
+
+    echo "---------------------------------------------------"
     read -n 1 -s -r -p "按任意键返回主菜单..."
 }
 
+# 启用防火墙并应用规则
 enable_firewall() {
     clear
     echo "================= 启用防火墙并应用规则 ================="
+
     status=$(ufw status | grep -i status | awk '{print $2}')
+
     if [ "$status" = "active" ]; then
         echo "✅ 防火墙已启用，正在重载规则..."
         ufw reload
         echo "✅ 防火墙规则已重载"
     else
         echo "🔧 正在启用防火墙并应用规则..."
+        # 设置默认策略
         ufw default deny incoming >/dev/null
         ufw default allow outgoing >/dev/null
         ufw enable
         echo "✅ 防火墙已启用"
     fi
+
     echo "---------------------------------------------------"
     echo "当前防火墙状态:"
     ufw status verbose
+
     echo "---------------------------------------------------"
     read -n 1 -s -r -p "按任意键返回主菜单..."
 }
 
+# 禁用防火墙
 disable_firewall() {
     clear
     echo "===================== 禁用防火墙 ===================="
+
     status=$(ufw status | grep -i status | awk '{print $2}')
+
     if [ "$status" = "inactive" ]; then
         echo "⚠️ 防火墙已处于禁用状态"
     else
@@ -433,15 +489,18 @@ disable_firewall() {
             echo "❌ 操作已取消"
         fi
     fi
+
     echo "---------------------------------------------------"
     read -n 1 -s -r -p "按任意键返回主菜单..."
 }
 
+# 重置防火墙
 reset_firewall() {
     clear
     echo "===================== 重置防火墙 ===================="
     echo -n "⚠️ 确定要重置防火墙吗? 所有规则将被删除! [y/N]: "
     read confirm
+
     if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
         ufw --force reset
         echo "✅ 防火墙已重置"
@@ -449,27 +508,40 @@ reset_firewall() {
     else
         echo "❌ 操作已取消"
     fi
+
     echo "---------------------------------------------------"
     read -n 1 -s -r -p "按任意键返回主菜单..."
 }
 
+# 更新脚本
 update_script() {
     clear
     echo "===================== 更新脚本 ===================="
     echo "正在检查更新..."
+
+    # 获取当前脚本路径
     CURRENT_SCRIPT=$(readlink -f "$0")
+
+    # 备份当前脚本
     BACKUP_FILE="${CURRENT_SCRIPT}.bak-$(date +%Y%m%d%H%M%S)"
     cp "$CURRENT_SCRIPT" "$BACKUP_FILE"
     echo "✅ 当前脚本已备份到: $BACKUP_FILE"
+
+    # 下载最新版本
     echo "下载最新版本..."
     wget -q -O "$CURRENT_SCRIPT" "$SCRIPT_URL"
+
     if [ $? -eq 0 ]; then
+        # 设置执行权限
         chmod +x "$CURRENT_SCRIPT"
         echo "✅ 脚本已更新到最新版本"
         echo "⚠️ 请重新运行脚本以使更新生效"
         echo "项目地址: $GITHUB_REPO"
+
+        # 询问是否重新运行
         echo -n "是否立即重新运行脚本? [Y/n]: "
         read restart_choice
+
         if [ -z "$restart_choice" ] || [ "$restart_choice" = "y" ] || [ "$restart_choice" = "Y" ]; then
             echo "🔄 重新运行脚本..."
             exec "$CURRENT_SCRIPT"
@@ -486,12 +558,15 @@ update_script() {
     fi
 }
 
+# 主函数
 main() {
     check_root
     install_ufw
+
     while true; do
         show_menu
         read choice
+
         case $choice in
             1) show_status ;;
             2) add_simple_rule ;;
@@ -503,14 +578,14 @@ main() {
             8) disable_firewall ;;
             9) reset_firewall ;;
             10) update_script ;;
-            0)
+            0) 
                 echo -e "\n感谢使用 UFW 防火墙管理工具!"
                 echo "下次使用请运行: sudo ufw-easy"
                 echo "项目地址: $GITHUB_REPO"
                 echo "再见！"
                 exit 0
                 ;;
-            *)
+            *) 
                 echo -e "\n❌ 无效选择，请重新输入"
                 sleep 1
                 ;;
@@ -518,4 +593,5 @@ main() {
     done
 }
 
+# 启动主函数
 main
