@@ -1,7 +1,8 @@
 #!/bin/bash
 
 # UFW 防火墙管理工具卸载脚本
-# 版本: 1.0
+# 版本: 2.0
+# 特点: 卸载后询问是否重启系统
 
 # 检查 root 权限
 if [ "$(id -u)" -ne 0 ]; then
@@ -65,4 +66,15 @@ esac
 
 echo "============================================="
 echo "卸载完成！建议重启系统使所有更改生效"
-echo "重启命令: sudo reboot"
+
+# 询问是否重启系统
+echo -n "是否立即重启系统? [y/N]: "
+read reboot_choice
+
+if [ "$reboot_choice" = "y" ] || [ "$reboot_choice" = "Y" ]; then
+    echo "🔄 正在重启系统..."
+    reboot
+else
+    echo "ℹ️ 您可以选择稍后手动重启: sudo reboot"
+    echo "防火墙更改将在重启后完全生效"
+fi
