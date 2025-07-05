@@ -2,7 +2,7 @@
 
 # ===========================================================
 # 增强版 UFW 防火墙管理工具
-# 版本: 4.3
+# 版本: 4.4
 # 项目地址: https://github.com/Lanlan13-14/UFW-Easy
 # 特点: 
 #   - 自动安装 UFW 但不自动启用
@@ -88,26 +88,57 @@ add_rule() {
     echo "⚠️ 注意: 规则将在重载防火墙后生效"
 }
 
-# 选择协议
-select_protocol() {
-    echo ""
-    echo "==================== 协议选择 ===================="
-    echo " 1) TCP"
-    echo " 2) UDP"
-    echo " 3) TCP+UDP"
-    echo "================================================="
-    echo -n "请选择协议 [1-3]: "
-    read protocol_choice
+# 协议选择菜单
+show_protocol_menu() {
+    local port="$1"
+    local rule_type="$2"
+    local ip="$3"
     
-    case $protocol_choice in
-        1) echo "tcp" ;;
-        2) echo "udp" ;;
-        3) echo "any" ;;
-        *) 
-            echo "⚠️ 无效选择，使用默认值: TCP+UDP"
-            echo "any"
-            ;;
-    esac
+    while true; do
+        clear
+        echo "==================== 协议选择 ===================="
+        echo " 端口: $port"
+        echo "-------------------------------------------------"
+        echo " 1. TCP"
+        echo " 2. UDP"
+        echo " 3. TCP+UDP"
+        echo " 0. 返回上一级"
+        echo "================================================="
+        echo -n "请选择协议 [0-3]: "
+        read protocol_choice
+        
+        case $protocol_choice in
+            1) 
+                if [ -z "$ip" ]; then
+                    add_rule "$rule_type $port/tcp"
+                else
+                    add_rule "$rule_type from $ip to any port $port/tcp"
+                fi
+                return
+                ;;
+            2) 
+                if [ -z "$ip" ]; then
+                    add_rule "$rule_type $port/udp"
+                else
+                    add_rule "$rule_type from $ip to any port $port/udp"
+                fi
+                return
+                ;;
+            3) 
+                if [ -z "$ip" ]; then
+                    add_rule "$rule_type $port"
+                else
+                    add_rule "$rule_type from $ip to any port $port"
+                fi
+                return
+                ;;
+            0) return ;;
+            *) 
+                echo "❌ 无效选择，请重新输入"
+                sleep 1
+                ;;
+        esac
+    done
 }
 
 # 添加简单规则
@@ -120,9 +151,9 @@ add_simple_rule() {
         echo " 3. 允许来源IP (所有端口)"
         echo " 4. 拒绝来源IP (所有端口)"
         echo " 5. 允许特定IP访问特定端口"
-        echo " 6. 返回主菜单"
+        echo " 0. 返回主菜单"
         echo "-----------------------------------------------------"
-        echo -n "请选择操作 [1-6]: "
+        echo -n "请选择操作 [0-5]: "
         read choice
 
         case $choice in
@@ -130,30 +161,20 @@ add_simple_rule() {
                 echo -n "请输入要允许的端口 (如: 80, 443, 22): "
                 read port
                 if [ -n "$port" ]; then
-                    echo "请为端口 $port 选择协议:"
-                    protocol=$(select_protocol)
-                    if [ "$protocol" == "any" ]; then
-                        add_rule "allow $port"
-                    else
-                        add_rule "allow $port/$protocol"
-                    fi
+                    show_protocol_menu "$port" "allow"
                 else
                     echo "❌ 端口不能为空"
+                    sleep 1
                 fi
                 ;;
             2) # 拒绝端口
                 echo -n "请输入要拒绝的端口 (如: 8080, 21): "
                 read port
                 if [ -n "$port" ]; then
-                    echo "请为端口 $port 选择协议:"
-                    protocol=$(select_protocol)
-                    if [ "$protocol" == "any" ]; then
-                        add_rule "deny $port"
-                    else
-                        add_rule "deny $port/$protocol"
-                    fi
+                    show_protocol_menu "$port" "deny"
                 else
                     echo "❌ 端口不能为空"
+                    sleep 1
                 fi
                 ;;
             3) # 允许来源IP
@@ -163,6 +184,7 @@ add_simple_rule() {
                     add_rule "allow from $ip"
                 else
                     echo "❌ IP地址不能为空"
+                    sleep 1
                 fi
                 ;;
             4) # 拒绝来源IP
@@ -172,6 +194,7 @@ add_simple_rule() {
                     add_rule "deny from $ip"
                 else
                     echo "❌ IP地址不能为空"
+                    sleep 1
                 fi
                 ;;
             5) # 允许特定IP访问特定端口
@@ -180,23 +203,18 @@ add_simple_rule() {
                 echo -n "请输入要允许的端口 (如: 22): "
                 read port
                 if [ -n "$ip" ] && [ -n "$port" ]; then
-                    echo "请为端口 $port 选择协议:"
-                    protocol=$(select_protocol)
-                    if [ "$protocol" == "any" ]; then
-                        add_rule "allow from $ip to any port $port"
-                    else
-                        add_rule "allow from $ip to any port $port/$protocol"
-                    fi
+                    show_protocol_menu "$port" "allow" "$ip"
                 else
                     echo "❌ IP地址和端口都不能为空"
+                    sleep 1
                 fi
                 ;;
-            6) return ;;
-            *) echo "❌ 无效选择" ;;
+            0) return ;;
+            *) 
+                echo "❌ 无效选择"
+                sleep 1
+                ;;
         esac
-
-        echo "---------------------------------------------------"
-        read -n 1 -s -r -p "按任意键继续..."
     done
 }
 
@@ -210,9 +228,9 @@ add_advanced_rule() {
         echo " 3. 允许特定网络接口"
         echo " 4. 设置特定协议规则"
         echo " 5. 添加应用配置文件规则"
-        echo " 6. 返回主菜单"
+        echo " 0. 返回主菜单"
         echo "-----------------------------------------------------"
-        echo -n "请选择操作 [1-6]: "
+        echo -n "请选择操作 [0-5]: "
         read choice
 
         case $choice in
@@ -223,33 +241,49 @@ add_advanced_rule() {
                 read start_port
                 echo -n "请输入结束端口: "
                 read end_port
-                echo "请为端口范围 $start_port:$end_port 选择协议:"
-                protocol=$(select_protocol)
-
+                
                 if [ -n "$ip" ] && [ -n "$start_port" ] && [ -n "$end_port" ]; then
-                    if [ "$protocol" == "any" ]; then
-                        add_rule "allow from $ip to any port $start_port:$end_port"
-                    else
-                        add_rule "allow from $ip to any port $start_port:$end_port/$protocol"
-                    fi
+                    clear
+                    echo "==================== 协议选择 ===================="
+                    echo " 端口范围: $start_port:$end_port"
+                    echo "-------------------------------------------------"
+                    echo " 1. TCP"
+                    echo " 2. UDP"
+                    echo " 3. TCP+UDP"
+                    echo " 0. 返回"
+                    echo "================================================="
+                    echo -n "请选择协议 [0-3]: "
+                    read protocol_choice
+                    
+                    case $protocol_choice in
+                        1) 
+                            add_rule "allow from $ip to any port $start_port:$end_port/tcp"
+                            ;;
+                        2) 
+                            add_rule "allow from $ip to any port $start_port:$end_port/udp"
+                            ;;
+                        3) 
+                            add_rule "allow from $ip to any port $start_port:$end_port"
+                            ;;
+                        0) ;;
+                        *) 
+                            echo "❌ 无效选择"
+                            sleep 1
+                            ;;
+                    esac
                 else
                     echo "❌ 所有字段都必须填写"
+                    sleep 1
                 fi
                 ;;
             2) # 设置限速规则
                 echo -n "请输入端口: "
                 read port
                 if [ -n "$port" ]; then
-                    echo "请为端口 $port 选择协议:"
-                    protocol=$(select_protocol)
-                    if [ "$protocol" == "any" ]; then
-                        add_rule "limit $port"
-                    else
-                        add_rule "limit $port/$protocol"
-                    fi
-                    echo "✅ 规则已添加: 端口 $port 限速"
+                    show_protocol_menu "$port" "limit"
                 else
                     echo "❌ 端口不能为空"
+                    sleep 1
                 fi
                 ;;
             3) # 允许特定网络接口
@@ -259,33 +293,51 @@ add_advanced_rule() {
                 read interface
 
                 if [ -n "$port" ] && [ -n "$interface" ]; then
-                    echo "请为端口 $port 选择协议:"
-                    protocol=$(select_protocol)
-                    if [ "$protocol" == "any" ]; then
-                        add_rule "allow in on $interface to any port $port"
-                    else
-                        add_rule "allow in on $interface to any port $port/$protocol"
-                    fi
+                    clear
+                    echo "==================== 协议选择 ===================="
+                    echo " 端口: $port"
+                    echo " 接口: $interface"
+                    echo "-------------------------------------------------"
+                    echo " 1. TCP"
+                    echo " 2. UDP"
+                    echo " 3. TCP+UDP"
+                    echo " 0. 返回"
+                    echo "================================================="
+                    echo -n "请选择协议 [0-3]: "
+                    read protocol_choice
+                    
+                    case $protocol_choice in
+                        1) 
+                            add_rule "allow in on $interface to any port $port/tcp"
+                            ;;
+                        2) 
+                            add_rule "allow in on $interface to any port $port/udp"
+                            ;;
+                        3) 
+                            add_rule "allow in on $interface to any port $port"
+                            ;;
+                        0) ;;
+                        *) 
+                            echo "❌ 无效选择"
+                            sleep 1
+                            ;;
+                    esac
                 else
                     echo "❌ 所有字段都必须填写"
+                    sleep 1
                 fi
                 ;;
             4) # 设置特定协议规则
                 echo -n "请输入端口: "
                 read port
-                echo "请为端口 $port 选择协议:"
-                protocol=$(select_protocol)
                 echo -n "允许还是拒绝? (allow/deny): "
                 read action
-
+                
                 if [ -n "$port" ] && [ -n "$action" ]; then
-                    if [ "$protocol" == "any" ]; then
-                        add_rule "$action $port"
-                    else
-                        add_rule "$action $port/$protocol"
-                    fi
+                    show_protocol_menu "$port" "$action"
                 else
                     echo "❌ 所有字段都必须填写"
+                    sleep 1
                 fi
                 ;;
             5) # 添加应用配置文件规则
@@ -298,14 +350,15 @@ add_advanced_rule() {
                     add_rule "allow $app"
                 else
                     echo "❌ 应用配置文件名不能为空"
+                    sleep 1
                 fi
                 ;;
-            6) return ;;
-            *) echo "❌ 无效选择" ;;
+            0) return ;;
+            *) 
+                echo "❌ 无效选择"
+                sleep 1
+                ;;
         esac
-
-        echo "---------------------------------------------------"
-        read -n 1 -s -r -p "按任意键继续..."
     done
 }
 
@@ -375,9 +428,9 @@ port_forwarding() {
     echo " 1. 添加端口转发规则"
     echo " 2. 查看当前端口转发规则"
     echo " 3. 删除端口转发规则"
-    echo " 4. 返回主菜单"
+    echo " 0. 返回主菜单"
     echo "-----------------------------------------------------"
-    echo -n "请选择操作 [1-4]: "
+    echo -n "请选择操作 [0-3]: "
     read choice
 
     case $choice in
@@ -388,17 +441,36 @@ port_forwarding() {
             read dest_ip
             echo -n "请输入目标端口: "
             read dest_port
-            echo "请为端口转发选择协议:"
-            protocol=$(select_protocol)
             
-            # 确保协议转换为小写
-            protocol=$(echo "$protocol" | tr '[:upper:]' '[:lower:]')
-            
-            if [ "$protocol" == "any" ]; then
-                protocol="tcp/udp"
-            fi
-
             if [ -n "$src_port" ] && [ -n "$dest_ip" ] && [ -n "$dest_port" ]; then
+                clear
+                echo "==================== 协议选择 ===================="
+                echo " 源端口: $src_port"
+                echo " 目标: $dest_ip:$dest_port"
+                echo "-------------------------------------------------"
+                echo " 1. TCP"
+                echo " 2. UDP"
+                echo " 3. TCP+UDP"
+                echo " 0. 返回"
+                echo "================================================="
+                echo -n "请选择协议 [0-3]: "
+                read protocol_choice
+                
+                case $protocol_choice in
+                    1) protocol="tcp" ;;
+                    2) protocol="udp" ;;
+                    3) protocol="tcp/udp" ;;
+                    0) 
+                        echo "❌ 操作已取消"
+                        sleep 1
+                        return
+                        ;;
+                    *) 
+                        echo "❌ 无效选择，使用默认值: TCP+UDP"
+                        protocol="tcp/udp"
+                        ;;
+                esac
+                
                 # 启用IP转发
                 sysctl -w net.ipv4.ip_forward=1
                 echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
@@ -414,6 +486,7 @@ port_forwarding() {
                 echo "⚠️ 注意: 变更将在重载防火墙后生效"
             else
                 echo "❌ 所有字段都必须填写"
+                sleep 1
             fi
             ;;
         2) # 查看端口转发规则
@@ -434,8 +507,11 @@ port_forwarding() {
                 echo "❌ 规则编号不能为空"
             fi
             ;;
-        4) return ;;
-        *) echo "❌ 无效选择" ;;
+        0) return ;;
+        *) 
+            echo "❌ 无效选择"
+            sleep 1
+            ;;
     esac
 
     echo "---------------------------------------------------"
