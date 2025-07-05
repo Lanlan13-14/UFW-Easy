@@ -5,7 +5,7 @@ sudo bash -c 'wget -O /usr/local/bin/ufw-easy https://raw.githubusercontent.com/
 ```
 ### 已安装过？执行
 ```
-sudo ufw-easy.sh
+sudo ufw-easy
 ```
 ### 卸载
 ```
