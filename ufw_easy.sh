@@ -90,6 +90,8 @@ add_rule() {
 
 # 选择协议
 select_protocol() {
+    echo ""
+    echo "====== 协议选择 ======"
     echo "请选择协议:"
     echo "  1) TCP"
     echo "  2) UDP"
@@ -128,6 +130,7 @@ add_simple_rule() {
                 echo -n "请输入要允许的端口 (如: 80, 443, 22): "
                 read port
                 if [ -n "$port" ]; then
+                    echo "请为端口 $port 选择协议..."
                     protocol=$(select_protocol)
                     if [ "$protocol" == "any" ]; then
                         add_rule "allow $port"
@@ -142,6 +145,7 @@ add_simple_rule() {
                 echo -n "请输入要拒绝的端口 (如: 8080, 21): "
                 read port
                 if [ -n "$port" ]; then
+                    echo "请为端口 $port 选择协议..."
                     protocol=$(select_protocol)
                     if [ "$protocol" == "any" ]; then
                         add_rule "deny $port"
@@ -176,6 +180,7 @@ add_simple_rule() {
                 echo -n "请输入要允许的端口 (如: 22): "
                 read port
                 if [ -n "$ip" ] && [ -n "$port" ]; then
+                    echo "请为端口 $port 选择协议..."
                     protocol=$(select_protocol)
                     if [ "$protocol" == "any" ]; then
                         add_rule "allow from $ip to any port $port"
@@ -218,6 +223,7 @@ add_advanced_rule() {
                 read start_port
                 echo -n "请输入结束端口: "
                 read end_port
+                echo "请为端口范围 $start_port:$end_port 选择协议..."
                 protocol=$(select_protocol)
 
                 if [ -n "$ip" ] && [ -n "$start_port" ] && [ -n "$end_port" ]; then
@@ -234,6 +240,7 @@ add_advanced_rule() {
                 echo -n "请输入端口: "
                 read port
                 if [ -n "$port" ]; then
+                    echo "请为端口 $port 选择协议..."
                     protocol=$(select_protocol)
                     if [ "$protocol" == "any" ]; then
                         add_rule "limit $port"
@@ -252,6 +259,7 @@ add_advanced_rule() {
                 read interface
 
                 if [ -n "$port" ] && [ -n "$interface" ]; then
+                    echo "请为端口 $port 选择协议..."
                     protocol=$(select_protocol)
                     if [ "$protocol" == "any" ]; then
                         add_rule "allow in on $interface to any port $port"
@@ -265,6 +273,7 @@ add_advanced_rule() {
             4) # 设置特定协议规则
                 echo -n "请输入端口: "
                 read port
+                echo "请为端口 $port 选择协议..."
                 protocol=$(select_protocol)
                 echo -n "允许还是拒绝? (allow/deny): "
                 read action
@@ -379,6 +388,7 @@ port_forwarding() {
             read dest_ip
             echo -n "请输入目标端口: "
             read dest_port
+            echo "请为端口转发选择协议..."
             protocol=$(select_protocol)
             
             # 确保协议转换为小写
