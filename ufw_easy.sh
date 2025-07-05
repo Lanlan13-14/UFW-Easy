@@ -2,7 +2,7 @@
 
 # ===========================================================
 # 增强版 UFW 防火墙管理工具
-# 版本: 4.5
+# 版本: 4.6
 # 项目地址: https://github.com/Lanlan13-14/UFW-Easy
 # 特点: 
 #   - 自动安装 UFW 但不自动启用
@@ -298,7 +298,40 @@ add_advanced_rule() {
                 echo -n "请输入端口: "
                 read port
                 if [ -n "$port" ]; then
-                    show_protocol_menu "$port" "limit"
+                    clear
+                    echo "==================== 设置限速规则 ===================="
+                    echo " 端口: $port"
+                    echo "-------------------------------------------------"
+                    echo " 1. TCP"
+                    echo " 2. UDP"
+                    echo " 3. TCP+UDP"
+                    echo " 0. 返回"
+                    echo "================================================="
+                    echo -n "请选择协议 [0-3]: "
+                    read protocol_choice
+                    
+                    case $protocol_choice in
+                        1) 
+                            add_rule "limit $port/tcp"
+                            echo "✅ 规则已添加: 端口 $port/TCP 限速 (默认: 每分钟6次连接)"
+                            read -n 1 -s -r -p "按任意键继续..."
+                            ;;
+                        2) 
+                            add_rule "limit $port/udp"
+                            echo "✅ 规则已添加: 端口 $port/UDP 限速 (默认: 每分钟6次连接)"
+                            read -n 1 -s -r -p "按任意键继续..."
+                            ;;
+                        3) 
+                            add_rule "limit $port"
+                            echo "✅ 规则已添加: 端口 $port 限速 (默认: 每分钟6次连接)"
+                            read -n 1 -s -r -p "按任意键继续..."
+                            ;;
+                        0) ;;
+                        *) 
+                            echo "❌ 无效选择"
+                            sleep 1
+                            ;;
+                    esac
                 else
                     echo "❌ 端口不能为空"
                     sleep 1
@@ -483,10 +516,35 @@ port_forwarding() {
                     echo -n "请选择协议 [0-3]: "
                     read protocol_choice
                     
+                    # 确保/etc/iptables目录存在
+                    if [ ! -d "/etc/iptables" ]; then
+                        mkdir -p /etc/iptables
+                        echo "✅ 创建目录: /etc/iptables"
+                    fi
+                    
                     case $protocol_choice in
-                        1) protocol="tcp" ;;
-                        2) protocol="udp" ;;
-                        3) protocol="tcp/udp" ;;
+                        1) 
+                            protocol="tcp"
+                            # 添加转发规则
+                            iptables -t nat -A PREROUTING -p tcp --dport "$src_port" -j DNAT --to-destination "${dest_ip}:${dest_port}"
+                            iptables -t nat -A POSTROUTING -p tcp -d "$dest_ip" --dport "$dest_port" -j MASQUERADE
+                            ;;
+                        2) 
+                            protocol="udp"
+                            # 添加转发规则
+                            iptables -t nat -A PREROUTING -p udp --dport "$src_port" -j DNAT --to-destination "${dest_ip}:${dest_port}"
+                            iptables -t nat -A POSTROUTING -p udp -d "$dest_ip" --dport "$dest_port" -j MASQUERADE
+                            ;;
+                        3) 
+                            protocol="tcp+udp"
+                            # 添加TCP转发规则
+                            iptables -t nat -A PREROUTING -p tcp --dport "$src_port" -j DNAT --to-destination "${dest_ip}:${dest_port}"
+                            iptables -t nat -A POSTROUTING -p tcp -d "$dest_ip" --dport "$dest_port" -j MASQUERADE
+                            
+                            # 添加UDP转发规则
+                            iptables -t nat -A PREROUTING -p udp --dport "$src_port" -j DNAT --to-destination "${dest_ip}:${dest_port}"
+                            iptables -t nat -A POSTROUTING -p udp -d "$dest_ip" --dport "$dest_port" -j MASQUERADE
+                            ;;
                         0) 
                             echo "❌ 操作已取消"
                             sleep 1
@@ -494,17 +552,20 @@ port_forwarding() {
                             ;;
                         *) 
                             echo "❌ 无效选择，使用默认值: TCP+UDP"
-                            protocol="tcp/udp"
+                            protocol="tcp+udp"
+                            # 添加TCP转发规则
+                            iptables -t nat -A PREROUTING -p tcp --dport "$src_port" -j DNAT --to-destination "${dest_ip}:${dest_port}"
+                            iptables -t nat -A POSTROUTING -p tcp -d "$dest_ip" --dport "$dest_port" -j MASQUERADE
+                            
+                            # 添加UDP转发规则
+                            iptables -t nat -A PREROUTING -p udp --dport "$src_port" -j DNAT --to-destination "${dest_ip}:${dest_port}"
+                            iptables -t nat -A POSTROUTING -p udp -d "$dest_ip" --dport "$dest_port" -j MASQUERADE
                             ;;
                     esac
                     
                     # 启用IP转发
                     sysctl -w net.ipv4.ip_forward=1
                     echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
-
-                    # 添加转发规则
-                    iptables -t nat -A PREROUTING -p "$protocol" --dport "$src_port" -j DNAT --to-destination "${dest_ip}:${dest_port}"
-                    iptables -t nat -A POSTROUTING -p "$protocol" -d "$dest_ip" --dport "$dest_port" -j MASQUERADE
 
                     # 保存规则
                     iptables-save > /etc/iptables/rules.v4
@@ -528,6 +589,12 @@ port_forwarding() {
                 echo -n "请输入要删除的规则编号: "
                 read rule_num
                 if [ -n "$rule_num" ]; then
+                    # 确保/etc/iptables目录存在
+                    if [ ! -d "/etc/iptables" ]; then
+                        mkdir -p /etc/iptables
+                        echo "✅ 创建目录: /etc/iptables"
+                    fi
+                    
                     iptables -t nat -D PREROUTING "$rule_num"
                     iptables-save > /etc/iptables/rules.v4
                     echo "✅ 规则 $rule_num 已删除"
