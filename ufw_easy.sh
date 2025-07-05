@@ -2,7 +2,7 @@
 
 # ===========================================================
 # 增强版 UFW 防火墙管理工具
-# 版本: 4.1
+# 版本: 4.2
 # 项目地址: https://github.com/Lanlan13-14/UFW-Easy
 # 特点: 
 #   - 自动安装 UFW 但不自动启用
@@ -57,10 +57,10 @@ show_menu() {
     echo " 7. 启用防火墙并应用规则"
     echo " 8. 禁用防火墙"
     echo " 9. 重置防火墙"
-    echo " u. 更新脚本"
+    echo "10. 更新脚本"
     echo " 0. 退出"
     echo "====================================================="
-    echo -n "请选择操作 [0-9,u]: "
+    echo -n "请选择操作 [0-10]: "
 }
 
 # 显示防火墙状态和规则
@@ -486,10 +486,9 @@ update_script() {
         echo "❌ 更新失败，请检查网络连接"
         echo "已恢复备份: $BACKUP_FILE"
         mv "$BACKUP_FILE" "$CURRENT_SCRIPT"
+        echo "---------------------------------------------------"
+        read -n 1 -s -r -p "按任意键返回主菜单..."
     fi
-    
-    echo "---------------------------------------------------"
-    read -n 1 -s -r -p "按任意键返回主菜单..."
 }
 
 # 主函数
@@ -511,7 +510,7 @@ main() {
             7) enable_firewall ;;
             8) disable_firewall ;;
             9) reset_firewall ;;
-            u|U) update_script ;;
+            10) update_script ;;
             0) 
                 echo -e "\n感谢使用 UFW 防火墙管理工具!"
                 echo "下次使用请运行: sudo ufw-easy"
