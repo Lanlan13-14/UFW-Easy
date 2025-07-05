@@ -1,7 +1,7 @@
 # UFW-Easy
 ### 1. 安装
 ```bash
-sudo bash -c "$(curl -sL https://raw.githubusercontent.com/Lanlan13-14/UFW-Easy/refs/heads/main/ufw_easy.sh)"
+sudo bash -c 'wget -O /usr/local/bin/ufw-easy https://raw.githubusercontent.com/Lanlan13-14/UFW-Easy/main/ufw_easy.sh && chmod +x /usr/local/bin/ufw-easy && ufw-easy'
 ```
 ### 已安装过？执行
 ```
