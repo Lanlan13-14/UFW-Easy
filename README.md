@@ -31,4 +31,5 @@ sudo bash -c "$(curl -sL https://raw.githubusercontent.com/Lanlan13-14/UFW-Easy/
 2. **默认策略**：入站默认拒绝所有，出站默认允许所有
 3. **规则生效**：所有规则变更需手动启用防火墙后才生效
 4. **规则顺序**：使用 `show_status` 查看规则顺序确认优先级
+5. **如果没有安装UFW会默认安装**
 
