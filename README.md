@@ -1,7 +1,7 @@
 # UFW-Easy
 ### 1. 安装并运行
 ```bash
-sudo bash -c "$(curl -sL https://raw.githubusercontent.com/Lanlan13-14/armbian-installer/master/ufw-easy.sh)"
+sudo bash -c "$(curl -sL https://raw.githubusercontent.com/Lanlan13-14/UFW-Easy/refs/heads/main/ufw_easy.sh)"
 ```
 已安装过？执行
 ```
