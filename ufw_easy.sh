@@ -2,13 +2,14 @@
 
 # ===========================================================
 # 增强版 UFW 防火墙管理工具
-# 版本: 4.2
+# 版本: 4.3
 # 项目地址: https://github.com/Lanlan13-14/UFW-Easy
 # 特点: 
 #   - 自动安装 UFW 但不自动启用
 #   - 所有规则变更需手动重载才生效
 #   - 规则自动优先于默认拒绝策略
 #   - 支持更新脚本功能
+#   - 支持 TCP/UDP 协议选择
 # ===========================================================
 
 # 项目信息
@@ -87,6 +88,26 @@ add_rule() {
     echo "⚠️ 注意: 规则将在重载防火墙后生效"
 }
 
+# 选择协议
+select_protocol() {
+    echo "请选择协议:"
+    echo "  1) TCP"
+    echo "  2) UDP"
+    echo "  3) TCP+UDP"
+    echo -n "输入选择 [1-3]: "
+    read protocol_choice
+    
+    case $protocol_choice in
+        1) echo "tcp" ;;
+        2) echo "udp" ;;
+        3) echo "any" ;;
+        *) 
+            echo "⚠️ 无效选择，使用默认值: TCP+UDP"
+            echo "any"
+            ;;
+    esac
+}
+
 # 添加简单规则
 add_simple_rule() {
     while true; do
@@ -104,19 +125,29 @@ add_simple_rule() {
 
         case $choice in
             1) # 允许端口
-                echo -n "请输入要允许的端口 (如: 80, 443, 22/tcp): "
+                echo -n "请输入要允许的端口 (如: 80, 443, 22): "
                 read port
                 if [ -n "$port" ]; then
-                    add_rule "allow $port"
+                    protocol=$(select_protocol)
+                    if [ "$protocol" == "any" ]; then
+                        add_rule "allow $port"
+                    else
+                        add_rule "allow $port/$protocol"
+                    fi
                 else
                     echo "❌ 端口不能为空"
                 fi
                 ;;
             2) # 拒绝端口
-                echo -n "请输入要拒绝的端口 (如: 8080, 21/tcp): "
+                echo -n "请输入要拒绝的端口 (如: 8080, 21): "
                 read port
                 if [ -n "$port" ]; then
-                    add_rule "deny $port"
+                    protocol=$(select_protocol)
+                    if [ "$protocol" == "any" ]; then
+                        add_rule "deny $port"
+                    else
+                        add_rule "deny $port/$protocol"
+                    fi
                 else
                     echo "❌ 端口不能为空"
                 fi
@@ -142,10 +173,15 @@ add_simple_rule() {
             5) # 允许特定IP访问特定端口
                 echo -n "请输入要允许的IP地址 (如: 192.168.1.100): "
                 read ip
-                echo -n "请输入要允许的端口 (如: 22/tcp): "
+                echo -n "请输入要允许的端口 (如: 22): "
                 read port
                 if [ -n "$ip" ] && [ -n "$port" ]; then
-                    add_rule "allow from $ip to any port $port"
+                    protocol=$(select_protocol)
+                    if [ "$protocol" == "any" ]; then
+                        add_rule "allow from $ip to any port $port"
+                    else
+                        add_rule "allow from $ip to any port $port/$protocol"
+                    fi
                 else
                     echo "❌ IP地址和端口都不能为空"
                 fi
@@ -182,12 +218,14 @@ add_advanced_rule() {
                 read start_port
                 echo -n "请输入结束端口: "
                 read end_port
-                echo -n "请输入协议 (tcp/udp, 默认为tcp): "
-                read protocol
-                protocol=${protocol:-tcp}
+                protocol=$(select_protocol)
 
                 if [ -n "$ip" ] && [ -n "$start_port" ] && [ -n "$end_port" ]; then
-                    add_rule "allow from $ip to any port $start_port:$end_port/$protocol"
+                    if [ "$protocol" == "any" ]; then
+                        add_rule "allow from $ip to any port $start_port:$end_port"
+                    else
+                        add_rule "allow from $ip to any port $start_port:$end_port/$protocol"
+                    fi
                 else
                     echo "❌ 所有字段都必须填写"
                 fi
@@ -196,7 +234,12 @@ add_advanced_rule() {
                 echo -n "请输入端口: "
                 read port
                 if [ -n "$port" ]; then
-                    add_rule "limit $port"
+                    protocol=$(select_protocol)
+                    if [ "$protocol" == "any" ]; then
+                        add_rule "limit $port"
+                    else
+                        add_rule "limit $port/$protocol"
+                    fi
                     echo "✅ 规则已添加: 端口 $port 限速"
                 else
                     echo "❌ 端口不能为空"
@@ -209,7 +252,12 @@ add_advanced_rule() {
                 read interface
 
                 if [ -n "$port" ] && [ -n "$interface" ]; then
-                    add_rule "allow in on $interface to any port $port"
+                    protocol=$(select_protocol)
+                    if [ "$protocol" == "any" ]; then
+                        add_rule "allow in on $interface to any port $port"
+                    else
+                        add_rule "allow in on $interface to any port $port/$protocol"
+                    fi
                 else
                     echo "❌ 所有字段都必须填写"
                 fi
@@ -217,13 +265,16 @@ add_advanced_rule() {
             4) # 设置特定协议规则
                 echo -n "请输入端口: "
                 read port
-                echo -n "请输入协议 (tcp/udp): "
-                read protocol
+                protocol=$(select_protocol)
                 echo -n "允许还是拒绝? (allow/deny): "
                 read action
 
-                if [ -n "$port" ] && [ -n "$protocol" ] && [ -n "$action" ]; then
-                    add_rule "$action $port/$protocol"
+                if [ -n "$port" ] && [ -n "$action" ]; then
+                    if [ "$protocol" == "any" ]; then
+                        add_rule "$action $port"
+                    else
+                        add_rule "$action $port/$protocol"
+                    fi
                 else
                     echo "❌ 所有字段都必须填写"
                 fi
@@ -328,10 +379,16 @@ port_forwarding() {
             read dest_ip
             echo -n "请输入目标端口: "
             read dest_port
-            echo -n "请输入协议 (tcp/udp): "
-            read protocol
+            protocol=$(select_protocol)
+            
+            # 确保协议转换为小写
+            protocol=$(echo "$protocol" | tr '[:upper:]' '[:lower:]')
+            
+            if [ "$protocol" == "any" ]; then
+                protocol="tcp/udp"
+            fi
 
-            if [ -n "$src_port" ] && [ -n "$dest_ip" ] && [ -n "$dest_port" ] && [ -n "$protocol" ]; then
+            if [ -n "$src_port" ] && [ -n "$dest_ip" ] && [ -n "$dest_port" ]; then
                 # 启用IP转发
                 sysctl -w net.ipv4.ip_forward=1
                 echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
@@ -343,7 +400,7 @@ port_forwarding() {
                 # 保存规则
                 iptables-save > /etc/iptables/rules.v4
 
-                echo "✅ 端口转发已添加: ${src_port} -> ${dest_ip}:${dest_port}/${protocol}"
+                echo "✅ 端口转发已添加: ${src_port}(${protocol}) -> ${dest_ip}:${dest_port}"
                 echo "⚠️ 注意: 变更将在重载防火墙后生效"
             else
                 echo "❌ 所有字段都必须填写"
@@ -451,30 +508,30 @@ update_script() {
     clear
     echo "===================== 更新脚本 ===================="
     echo "正在检查更新..."
-    
+
     # 获取当前脚本路径
     CURRENT_SCRIPT=$(readlink -f "$0")
-    
+
     # 备份当前脚本
     BACKUP_FILE="${CURRENT_SCRIPT}.bak-$(date +%Y%m%d%H%M%S)"
     cp "$CURRENT_SCRIPT" "$BACKUP_FILE"
     echo "✅ 当前脚本已备份到: $BACKUP_FILE"
-    
+
     # 下载最新版本
     echo "下载最新版本..."
     wget -q -O "$CURRENT_SCRIPT" "$SCRIPT_URL"
-    
+
     if [ $? -eq 0 ]; then
         # 设置执行权限
         chmod +x "$CURRENT_SCRIPT"
         echo "✅ 脚本已更新到最新版本"
         echo "⚠️ 请重新运行脚本以使更新生效"
         echo "项目地址: $GITHUB_REPO"
-        
+
         # 询问是否重新运行
         echo -n "是否立即重新运行脚本? [Y/n]: "
         read restart_choice
-        
+
         if [ -z "$restart_choice" ] || [ "$restart_choice" = "y" ] || [ "$restart_choice" = "Y" ]; then
             echo "🔄 重新运行脚本..."
             exec "$CURRENT_SCRIPT"
