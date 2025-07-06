@@ -2,7 +2,7 @@
 
 # ===========================================================
 # 增强版 UFW 防火墙管理工具
-# 版本: 4.7
+# 版本: 4.9
 # 项目地址: https://github.com/Lanlan13-14/UFW-Easy
 # 特点: 
 #   - 自动安装 UFW 但不自动启用
@@ -367,13 +367,13 @@ add_advanced_rule() {
     done
 }
 
-# 删除规则
+# 删除规则（智能识别输入格式）
 delete_rule() {
     clear
     echo "===================== 删除规则 ===================="
     echo "当前防火墙规则列表:"
     ufw status numbered
-    
+
     echo "--------------------------------------------------"
     echo -n "请输入要删除的规则编号 (或 'a' 删除所有规则): "
     read rule_num
@@ -391,13 +391,18 @@ delete_rule() {
             echo "❌ 操作已取消"
         fi
     else
-        # 检查规则是否存在
-        if ufw status numbered | grep -q "^\[$rule_num\]"; then
-            ufw --force delete "$rule_num"
-            echo "✅ 规则 $rule_num 已删除"
+        # 智能识别不同格式的规则编号
+        # 处理 [1]、[ 1] 或 1 等格式
+        cleaned_num=$(echo "$rule_num" | tr -d '[] ' | tr -cd '0-9')
+        
+        if [ -z "$cleaned_num" ]; then
+            echo "❌ 无效的规则编号: $rule_num"
+        elif ufw status numbered | grep -q "^\[ *$cleaned_num\]"; then
+            ufw --force delete "$cleaned_num"
+            echo "✅ 规则 $cleaned_num 已删除 (输入: $rule_num)"
             echo "⚠️ 注意: 变更将在重载防火墙后生效"
         else
-            echo "❌ 规则 $rule_num 不存在"
+            echo "❌ 规则 $cleaned_num 不存在 (输入: $rule_num)"
         fi
     fi
 
@@ -686,7 +691,7 @@ uninstall_script() {
     echo "---------------------------------------------------"
     echo -n "确定要卸载吗? [y/N]: "
     read confirm
-    
+
     if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
         echo "正在执行卸载脚本..."
         # 执行远程卸载脚本
