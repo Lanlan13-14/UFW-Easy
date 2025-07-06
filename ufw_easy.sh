@@ -2,7 +2,7 @@
 
 # ===========================================================
 # 增强版 UFW 防火墙管理工具
-# 版本: 4.6
+# 版本: 4.7
 # 项目地址: https://github.com/Lanlan13-14/UFW-Easy
 # 特点: 
 #   - 自动安装 UFW 但不自动启用
@@ -15,6 +15,7 @@
 # 项目信息
 GITHUB_REPO="https://github.com/Lanlan13-14/UFW-Easy"
 SCRIPT_URL="https://raw.githubusercontent.com/Lanlan13-14/UFW-Easy/main/ufw_easy.sh"
+UNINSTALL_URL="https://raw.githubusercontent.com/Lanlan13-14/UFW-Easy/main/uninstall.sh"
 
 # 检查 root 权限
 check_root() {
@@ -59,9 +60,10 @@ show_menu() {
     echo " 8. 禁用防火墙"
     echo " 9. 重置防火墙"
     echo "10. 更新脚本"
+    echo "11. 卸载脚本"
     echo " 0. 退出"
     echo "====================================================="
-    echo -n "请选择操作 [0-10]: "
+    echo -n "请选择操作 [0-11]: "
 }
 
 # 显示防火墙状态和规则
@@ -93,7 +95,7 @@ show_protocol_menu() {
     local port="$1"
     local rule_type="$2"
     local ip="$3"
-    
+
     while true; do
         clear
         echo "==================== 协议选择 ===================="
@@ -107,7 +109,7 @@ show_protocol_menu() {
         echo "================================================="
         echo -n "请选择协议 [0-3]: "
         read protocol_choice
-        
+
         case $protocol_choice in
             1) 
                 if [ -z "$ip" ]; then
@@ -252,43 +254,10 @@ add_advanced_rule() {
                 read start_port
                 echo -n "请输入结束端口: "
                 read end_port
-                
+
                 if [ -n "$ip" ] && [ -n "$start_port" ] && [ -n "$end_port" ]; then
-                    clear
-                    echo "==================== 协议选择 ===================="
-                    echo " 端口范围: $start_port:$end_port"
-                    echo " IP地址: $ip"
-                    echo "-------------------------------------------------"
-                    echo " 1. TCP"
-                    echo " 2. UDP"
-                    echo " 3. TCP+UDP"
-                    echo " 0. 返回"
-                    echo "================================================="
-                    echo -n "请选择协议 [0-3]: "
-                    read protocol_choice
-                    
-                    case $protocol_choice in
-                        1) 
-                            add_rule "allow from $ip to any port $start_port:$end_port/tcp"
-                            echo "✅ 规则已添加: 允许 $ip 访问端口 $start_port:$end_port/TCP"
-                            read -n 1 -s -r -p "按任意键继续..."
-                            ;;
-                        2) 
-                            add_rule "allow from $ip to any port $start_port:$end_port/udp"
-                            echo "✅ 规则已添加: 允许 $ip 访问端口 $start_port:$end_port/UDP"
-                            read -n 1 -s -r -p "按任意键继续..."
-                            ;;
-                        3) 
-                            add_rule "allow from $ip to any port $start_port:$end_port"
-                            echo "✅ 规则已添加: 允许 $ip 访问端口 $start_port:$end_port"
-                            read -n 1 -s -r -p "按任意键继续..."
-                            ;;
-                        0) ;;
-                        *) 
-                            echo "❌ 无效选择"
-                            sleep 1
-                            ;;
-                    esac
+                    # 复用协议选择菜单
+                    show_protocol_menu "$start_port:$end_port" "allow" "$ip"
                 else
                     echo "❌ 所有字段都必须填写"
                     sleep 1
@@ -298,40 +267,8 @@ add_advanced_rule() {
                 echo -n "请输入端口: "
                 read port
                 if [ -n "$port" ]; then
-                    clear
-                    echo "==================== 设置限速规则 ===================="
-                    echo " 端口: $port"
-                    echo "-------------------------------------------------"
-                    echo " 1. TCP"
-                    echo " 2. UDP"
-                    echo " 3. TCP+UDP"
-                    echo " 0. 返回"
-                    echo "================================================="
-                    echo -n "请选择协议 [0-3]: "
-                    read protocol_choice
-                    
-                    case $protocol_choice in
-                        1) 
-                            add_rule "limit $port/tcp"
-                            echo "✅ 规则已添加: 端口 $port/TCP 限速 (默认: 每分钟6次连接)"
-                            read -n 1 -s -r -p "按任意键继续..."
-                            ;;
-                        2) 
-                            add_rule "limit $port/udp"
-                            echo "✅ 规则已添加: 端口 $port/UDP 限速 (默认: 每分钟6次连接)"
-                            read -n 1 -s -r -p "按任意键继续..."
-                            ;;
-                        3) 
-                            add_rule "limit $port"
-                            echo "✅ 规则已添加: 端口 $port 限速 (默认: 每分钟6次连接)"
-                            read -n 1 -s -r -p "按任意键继续..."
-                            ;;
-                        0) ;;
-                        *) 
-                            echo "❌ 无效选择"
-                            sleep 1
-                            ;;
-                    esac
+                    # 复用协议选择菜单
+                    show_protocol_menu "$port" "limit"
                 else
                     echo "❌ 端口不能为空"
                     sleep 1
@@ -344,41 +281,49 @@ add_advanced_rule() {
                 read interface
 
                 if [ -n "$port" ] && [ -n "$interface" ]; then
-                    clear
-                    echo "==================== 协议选择 ===================="
-                    echo " 端口: $port"
-                    echo " 接口: $interface"
-                    echo "-------------------------------------------------"
-                    echo " 1. TCP"
-                    echo " 2. UDP"
-                    echo " 3. TCP+UDP"
-                    echo " 0. 返回"
-                    echo "================================================="
-                    echo -n "请选择协议 [0-3]: "
-                    read protocol_choice
-                    
-                    case $protocol_choice in
-                        1) 
-                            add_rule "allow in on $interface to any port $port/tcp"
-                            echo "✅ 规则已添加: 允许 $interface 接口上的 $port/TCP 访问"
-                            read -n 1 -s -r -p "按任意键继续..."
-                            ;;
-                        2) 
-                            add_rule "allow in on $interface to any port $port/udp"
-                            echo "✅ 规则已添加: 允许 $interface 接口上的 $port/UDP 访问"
-                            read -n 1 -s -r -p "按任意键继续..."
-                            ;;
-                        3) 
-                            add_rule "allow in on $interface to any port $port"
-                            echo "✅ 规则已添加: 允许 $interface 接口上的 $port 访问"
-                            read -n 1 -s -r -p "按任意键继续..."
-                            ;;
-                        0) ;;
-                        *) 
-                            echo "❌ 无效选择"
-                            sleep 1
-                            ;;
-                    esac
+                    # 复用协议选择菜单
+                    while true; do
+                        clear
+                        echo "==================== 协议选择 ===================="
+                        echo " 端口: $port"
+                        echo " 接口: $interface"
+                        echo "-------------------------------------------------"
+                        echo " 1. TCP"
+                        echo " 2. UDP"
+                        echo " 3. TCP+UDP"
+                        echo " 0. 返回"
+                        echo "================================================="
+                        echo -n "请选择协议 [0-3]: "
+                        read protocol_choice
+
+                        case $protocol_choice in
+                            1) 
+                                add_rule "allow in on $interface to any port $port/tcp"
+                                echo "✅ 规则已添加: 允许 $interface 接口上的 $port/TCP 访问"
+                                read -n 1 -s -r -p "按任意键继续..."
+                                break
+                                ;;
+                            2) 
+                                add_rule "allow in on $interface to any port $port/udp"
+                                echo "✅ 规则已添加: 允许 $interface 接口上的 $port/UDP 访问"
+                                read -n 1 -s -r -p "按任意键继续..."
+                                break
+                                ;;
+                            3) 
+                                add_rule "allow in on $interface to any port $port"
+                                echo "✅ 规则已添加: 允许 $interface 接口上的 $port 访问"
+                                read -n 1 -s -r -p "按任意键继续..."
+                                break
+                                ;;
+                            0) 
+                                break
+                                ;;
+                            *) 
+                                echo "❌ 无效选择"
+                                sleep 1
+                                ;;
+                        esac
+                    done
                 else
                     echo "❌ 所有字段都必须填写"
                     sleep 1
@@ -389,8 +334,9 @@ add_advanced_rule() {
                 read port
                 echo -n "允许还是拒绝? (allow/deny): "
                 read action
-                
+
                 if [ -n "$port" ] && [ -n "$action" ]; then
+                    # 复用协议选择菜单
                     show_protocol_menu "$port" "$action"
                 else
                     echo "❌ 所有字段都必须填写"
@@ -425,12 +371,9 @@ add_advanced_rule() {
 delete_rule() {
     clear
     echo "===================== 删除规则 ===================="
-    echo "编号 | 规则"
-    echo "--------------------------------------------------"
-
-    # 显示带编号的规则列表
-    ufw status numbered | grep -v 'Status:' | grep -v 'To' | grep -v '--' | nl -v 0
-
+    echo "当前防火墙规则列表:"
+    ufw status numbered
+    
     echo "--------------------------------------------------"
     echo -n "请输入要删除的规则编号 (或 'a' 删除所有规则): "
     read rule_num
@@ -501,78 +444,82 @@ port_forwarding() {
                 read dest_ip
                 echo -n "请输入目标端口: "
                 read dest_port
-                
+
                 if [ -n "$src_port" ] && [ -n "$dest_ip" ] && [ -n "$dest_port" ]; then
-                    clear
-                    echo "==================== 协议选择 ===================="
-                    echo " 源端口: $src_port"
-                    echo " 目标: $dest_ip:$dest_port"
-                    echo "-------------------------------------------------"
-                    echo " 1. TCP"
-                    echo " 2. UDP"
-                    echo " 3. TCP+UDP"
-                    echo " 0. 返回"
-                    echo "================================================="
-                    echo -n "请选择协议 [0-3]: "
-                    read protocol_choice
-                    
-                    # 确保/etc/iptables目录存在
-                    if [ ! -d "/etc/iptables" ]; then
-                        mkdir -p /etc/iptables
-                        echo "✅ 创建目录: /etc/iptables"
-                    fi
-                    
-                    case $protocol_choice in
-                        1) 
-                            protocol="tcp"
-                            # 添加转发规则
-                            iptables -t nat -A PREROUTING -p tcp --dport "$src_port" -j DNAT --to-destination "${dest_ip}:${dest_port}"
-                            iptables -t nat -A POSTROUTING -p tcp -d "$dest_ip" --dport "$dest_port" -j MASQUERADE
-                            ;;
-                        2) 
-                            protocol="udp"
-                            # 添加转发规则
-                            iptables -t nat -A PREROUTING -p udp --dport "$src_port" -j DNAT --to-destination "${dest_ip}:${dest_port}"
-                            iptables -t nat -A POSTROUTING -p udp -d "$dest_ip" --dport "$dest_port" -j MASQUERADE
-                            ;;
-                        3) 
-                            protocol="tcp+udp"
-                            # 添加TCP转发规则
-                            iptables -t nat -A PREROUTING -p tcp --dport "$src_port" -j DNAT --to-destination "${dest_ip}:${dest_port}"
-                            iptables -t nat -A POSTROUTING -p tcp -d "$dest_ip" --dport "$dest_port" -j MASQUERADE
-                            
-                            # 添加UDP转发规则
-                            iptables -t nat -A PREROUTING -p udp --dport "$src_port" -j DNAT --to-destination "${dest_ip}:${dest_port}"
-                            iptables -t nat -A POSTROUTING -p udp -d "$dest_ip" --dport "$dest_port" -j MASQUERADE
-                            ;;
-                        0) 
-                            echo "❌ 操作已取消"
-                            sleep 1
-                            continue
-                            ;;
-                        *) 
-                            echo "❌ 无效选择，使用默认值: TCP+UDP"
-                            protocol="tcp+udp"
-                            # 添加TCP转发规则
-                            iptables -t nat -A PREROUTING -p tcp --dport "$src_port" -j DNAT --to-destination "${dest_ip}:${dest_port}"
-                            iptables -t nat -A POSTROUTING -p tcp -d "$dest_ip" --dport "$dest_port" -j MASQUERADE
-                            
-                            # 添加UDP转发规则
-                            iptables -t nat -A PREROUTING -p udp --dport "$src_port" -j DNAT --to-destination "${dest_ip}:${dest_port}"
-                            iptables -t nat -A POSTROUTING -p udp -d "$dest_ip" --dport "$dest_port" -j MASQUERADE
-                            ;;
-                    esac
-                    
-                    # 启用IP转发
-                    sysctl -w net.ipv4.ip_forward=1
-                    echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
+                    # 复用协议选择菜单
+                    while true; do
+                        clear
+                        echo "==================== 协议选择 ===================="
+                        echo " 源端口: $src_port"
+                        echo " 目标: $dest_ip:$dest_port"
+                        echo "-------------------------------------------------"
+                        echo " 1. TCP"
+                        echo " 2. UDP"
+                        echo " 3. TCP+UDP"
+                        echo " 0. 返回"
+                        echo "================================================="
+                        echo -n "请选择协议 [0-3]: "
+                        read protocol_choice
 
-                    # 保存规则
-                    iptables-save > /etc/iptables/rules.v4
+                        # 确保/etc/iptables目录存在
+                        if [ ! -d "/etc/iptables" ]; then
+                            mkdir -p /etc/iptables
+                            echo "✅ 创建目录: /etc/iptables"
+                        fi
 
-                    echo "✅ 端口转发已添加: ${src_port}(${protocol}) -> ${dest_ip}:${dest_port}"
-                    echo "⚠️ 注意: 变更将在重载防火墙后生效"
-                    read -n 1 -s -r -p "按任意键继续..."
+                        case $protocol_choice in
+                            1) 
+                                protocol="tcp"
+                                # 添加转发规则
+                                iptables -t nat -A PREROUTING -p tcp --dport "$src_port" -j DNAT --to-destination "${dest_ip}:${dest_port}"
+                                iptables -t nat -A POSTROUTING -p tcp -d "$dest_ip" --dport "$dest_port" -j MASQUERADE
+                                ;;
+                            2) 
+                                protocol="udp"
+                                # 添加转发规则
+                                iptables -t nat -A PREROUTING -p udp --dport "$src_port" -j DNAT --to-destination "${dest_ip}:${dest_port}"
+                                iptables -t nat -A POSTROUTING -p udp -d "$dest_ip" --dport "$dest_port" -j MASQUERADE
+                                ;;
+                            3) 
+                                protocol="tcp+udp"
+                                # 添加TCP转发规则
+                                iptables -t nat -A PREROUTING -p tcp --dport "$src_port" -j DNAT --to-destination "${dest_ip}:${dest_port}"
+                                iptables -t nat -A POSTROUTING -p tcp -d "$dest_ip" --dport "$dest_port" -j MASQUERADE
+
+                                # 添加UDP转发规则
+                                iptables -t nat -A PREROUTING -p udp --dport "$src_port" -j DNAT --to-destination "${dest_ip}:${dest_port}"
+                                iptables -t nat -A POSTROUTING -p udp -d "$dest_ip" --dport "$dest_port" -j MASQUERADE
+                                ;;
+                            0) 
+                                echo "❌ 操作已取消"
+                                sleep 1
+                                continue 2
+                                ;;
+                            *) 
+                                echo "❌ 无效选择，使用默认值: TCP+UDP"
+                                protocol="tcp+udp"
+                                # 添加TCP转发规则
+                                iptables -t nat -A PREROUTING -p tcp --dport "$src_port" -j DNAT --to-destination "${dest_ip}:${dest_port}"
+                                iptables -t nat -A POSTROUTING -p tcp -d "$dest_ip" --dport "$dest_port" -j MASQUERADE
+
+                                # 添加UDP转发规则
+                                iptables -t nat -A PREROUTING -p udp --dport "$src_port" -j DNAT --to-destination "${dest_ip}:${dest_port}"
+                                iptables -t nat -A POSTROUTING -p udp -d "$dest_ip" --dport "$dest_port" -j MASQUERADE
+                                ;;
+                        esac
+
+                        # 启用IP转发
+                        sysctl -w net.ipv4.ip_forward=1
+                        echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
+
+                        # 保存规则
+                        iptables-save > /etc/iptables/rules.v4
+
+                        echo "✅ 端口转发已添加: ${src_port}(${protocol}) -> ${dest_ip}:${dest_port}"
+                        echo "⚠️ 注意: 变更将在重载防火墙后生效"
+                        read -n 1 -s -r -p "按任意键继续..."
+                        break
+                    done
                 else
                     echo "❌ 所有字段都必须填写"
                     sleep 1
@@ -594,7 +541,7 @@ port_forwarding() {
                         mkdir -p /etc/iptables
                         echo "✅ 创建目录: /etc/iptables"
                     fi
-                    
+
                     iptables -t nat -D PREROUTING "$rule_num"
                     iptables-save > /etc/iptables/rules.v4
                     echo "✅ 规则 $rule_num 已删除"
@@ -730,6 +677,28 @@ update_script() {
     fi
 }
 
+# 卸载脚本
+uninstall_script() {
+    clear
+    echo "===================== 卸载脚本 ===================="
+    echo "⚠️ 警告: 此操作将卸载 UFW 防火墙管理工具"
+    echo "      也可能会删除 UFW 防火墙本身，取决于你的选择"
+    echo "---------------------------------------------------"
+    echo -n "确定要卸载吗? [y/N]: "
+    read confirm
+    
+    if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
+        echo "正在执行卸载脚本..."
+        # 执行远程卸载脚本
+        bash -c "$(curl -sL $UNINSTALL_URL)"
+        exit 0
+    else
+        echo "❌ 操作已取消"
+        echo "---------------------------------------------------"
+        read -n 1 -s -r -p "按任意键返回主菜单..."
+    fi
+}
+
 # 主函数
 main() {
     check_root
@@ -750,6 +719,7 @@ main() {
             8) disable_firewall ;;
             9) reset_firewall ;;
             10) update_script ;;
+            11) uninstall_script ;;
             0) 
                 echo -e "\n感谢使用 UFW 防火墙管理工具!"
                 echo "下次使用请运行: sudo ufw-easy"
