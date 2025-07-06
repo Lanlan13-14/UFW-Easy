@@ -8,7 +8,7 @@ sudo bash -c 'wget -O /usr/local/bin/ufw-easy https://raw.githubusercontent.com/
 sudo ufw-easy
 ```
 ### 卸载
-##### 本步骤已集成于ufw-easy可直接输入ufw-easy选择11运行，效果与此处卸载脚本一致一样
+##### 本步骤已集成于ufw-easy可直接输入ufw-easy选择11运行，效果与此处卸载脚本一致
 ```
 sudo bash -c "$(curl -sL https://raw.githubusercontent.com/Lanlan13-14/UFW-Easy/main/uninstall.sh)"
 ```
