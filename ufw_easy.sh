@@ -13,7 +13,7 @@
 
 # 项目信息
 GITHUB_REPO="https://github.com/Lanlan13-14/UFW-Easy"
-SCRIPT_URL="https://raw.githubusercontent.com/Lanlan13-14/UFW-Easy/main/ufw-easy"
+SCRIPT_URL="https://raw.githubusercontent.com/Lanlan13-14/UFW-Easy/refs/heads/main/ufw_easy.sh"
 UNINSTALL_URL="https://raw.githubusercontent.com/Lanlan13-14/UFW-Easy/main/uninstall.sh"
 
 # 安装路径
