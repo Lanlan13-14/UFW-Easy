@@ -2,14 +2,14 @@
 
 # ===========================================================
 # 增强版 UFW 防火墙管理工具
-# 版本: 4.9
+# 版本: 5.0
 # 项目地址: https://github.com/Lanlan13-14/UFW-Easy
 # 特点: 
-#   - 自动安装 UFW 但不自动启用
+#   - 自动安装 UFW 和 iptables-persistent
+#   - 完整的端口转发支持
+#   - 自动管理 IP 转发状态
+#   - 智能规则清理
 #   - 所有规则变更需手动重载才生效
-#   - 规则自动优先于默认拒绝策略
-#   - 支持更新脚本功能
-#   - 支持 TCP/UDP 协议选择
 # ===========================================================
 
 # 项目信息
@@ -28,13 +28,17 @@ check_root() {
 # 安装 UFW（如果未安装）
 install_ufw() {
     if ! command -v ufw &> /dev/null; then
-        echo "🔧 安装 UFW 防火墙..."
+        echo "🔧 安装 UFW 防火墙和必要组件..."
         apt update
-        apt install -y ufw
-        echo "✅ UFW 已安装"
+        apt install -y ufw iptables-persistent netfilter-persistent
+        echo "✅ UFW 和相关组件已安装"
+        
         # 初始禁用 UFW
         ufw disable >/dev/null 2>&1
         echo "⚠️ UFW 已禁用（等待手动启用）"
+        
+        # 创建 iptables 目录
+        mkdir -p /etc/iptables
     fi
 }
 
@@ -42,13 +46,14 @@ install_ufw() {
 show_menu() {
     clear
     echo "====================================================="
-    echo "          增强版 UFW 防火墙管理工具"
+    echo "          增强版 UFW 防火墙管理工具 (v5.0)"
     echo "  项目地址: ${GITHUB_REPO}"
     echo "====================================================="
     ufw_status=$(ufw status | grep -i status)
     echo " 当前状态: ${ufw_status}"
     echo " 默认入站策略: deny (拒绝所有)"
     echo " 默认出站策略: allow (允许所有)"
+    echo " IP转发状态: $(sysctl -n net.ipv4.ip_forward)"
     echo "-----------------------------------------------------"
     echo " 1. 显示防火墙状态和规则"
     echo " 2. 添加简单规则"
@@ -394,7 +399,7 @@ delete_rule() {
         # 智能识别不同格式的规则编号
         # 处理 [1]、[ 1] 或 1 等格式
         cleaned_num=$(echo "$rule_num" | tr -d '[] ' | tr -cd '0-9')
-        
+
         if [ -z "$cleaned_num" ]; then
             echo "❌ 无效的规则编号: $rule_num"
         elif ufw status numbered | grep -q "^\[ *$cleaned_num\]"; then
@@ -428,8 +433,30 @@ view_app_profiles() {
     read -n 1 -s -r -p "按任意键返回主菜单..."
 }
 
+# 确保IP转发已开启并持久化
+ensure_ip_forwarding() {
+    if ! grep -q "net.ipv4.ip_forward=1" /etc/sysctl.conf; then
+        echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
+        sysctl -p >/dev/null
+        echo "✅ 已开启IP转发并持久化"
+    fi
+}
+
+# 检查并关闭IP转发（如果没有转发规则）
+check_forwarding_rules() {
+    if ! iptables -t nat -L PREROUTING -n | grep -q "DNAT"; then
+        # 没有转发规则时关闭IP转发
+        sed -i '/net.ipv4.ip_forward=1/d' /etc/sysctl.conf
+        sysctl -p >/dev/null
+        echo "ℹ️ 所有端口转发已删除，已关闭IP转发"
+    fi
+}
+
 # 端口转发设置
 port_forwarding() {
+    # 确保目录存在
+    mkdir -p /etc/iptables
+    
     while true; do
         clear
         echo "==================== 端口转发设置 ===================="
@@ -451,7 +478,10 @@ port_forwarding() {
                 read dest_port
 
                 if [ -n "$src_port" ] && [ -n "$dest_ip" ] && [ -n "$dest_port" ]; then
-                    # 复用协议选择菜单
+                    # 确保IP转发已开启
+                    ensure_ip_forwarding
+                    
+                    # 协议选择
                     while true; do
                         clear
                         echo "==================== 协议选择 ===================="
@@ -466,11 +496,8 @@ port_forwarding() {
                         echo -n "请选择协议 [0-3]: "
                         read protocol_choice
 
-                        # 确保/etc/iptables目录存在
-                        if [ ! -d "/etc/iptables" ]; then
-                            mkdir -p /etc/iptables
-                            echo "✅ 创建目录: /etc/iptables"
-                        fi
+                        # 准备规则注释
+                        rule_comment="PortForwarding: ${src_port}->${dest_ip}:${dest_port}"
 
                         case $protocol_choice in
                             1) 
@@ -478,22 +505,28 @@ port_forwarding() {
                                 # 添加转发规则
                                 iptables -t nat -A PREROUTING -p tcp --dport "$src_port" -j DNAT --to-destination "${dest_ip}:${dest_port}"
                                 iptables -t nat -A POSTROUTING -p tcp -d "$dest_ip" --dport "$dest_port" -j MASQUERADE
+                                # 添加UFW放行规则
+                                ufw allow proto tcp to "$dest_ip" port "$dest_port" comment "$rule_comment"
                                 ;;
                             2) 
                                 protocol="udp"
                                 # 添加转发规则
                                 iptables -t nat -A PREROUTING -p udp --dport "$src_port" -j DNAT --to-destination "${dest_ip}:${dest_port}"
                                 iptables -t nat -A POSTROUTING -p udp -d "$dest_ip" --dport "$dest_port" -j MASQUERADE
+                                # 添加UFW放行规则
+                                ufw allow proto udp to "$dest_ip" port "$dest_port" comment "$rule_comment"
                                 ;;
                             3) 
                                 protocol="tcp+udp"
                                 # 添加TCP转发规则
                                 iptables -t nat -A PREROUTING -p tcp --dport "$src_port" -j DNAT --to-destination "${dest_ip}:${dest_port}"
                                 iptables -t nat -A POSTROUTING -p tcp -d "$dest_ip" --dport "$dest_port" -j MASQUERADE
-
                                 # 添加UDP转发规则
                                 iptables -t nat -A PREROUTING -p udp --dport "$src_port" -j DNAT --to-destination "${dest_ip}:${dest_port}"
                                 iptables -t nat -A POSTROUTING -p udp -d "$dest_ip" --dport "$dest_port" -j MASQUERADE
+                                # 添加UFW放行规则
+                                ufw allow proto tcp to "$dest_ip" port "$dest_port" comment "$rule_comment (TCP)"
+                                ufw allow proto udp to "$dest_ip" port "$dest_port" comment "$rule_comment (UDP)"
                                 ;;
                             0) 
                                 echo "❌ 操作已取消"
@@ -506,16 +539,14 @@ port_forwarding() {
                                 # 添加TCP转发规则
                                 iptables -t nat -A PREROUTING -p tcp --dport "$src_port" -j DNAT --to-destination "${dest_ip}:${dest_port}"
                                 iptables -t nat -A POSTROUTING -p tcp -d "$dest_ip" --dport "$dest_port" -j MASQUERADE
-
                                 # 添加UDP转发规则
                                 iptables -t nat -A PREROUTING -p udp --dport "$src_port" -j DNAT --to-destination "${dest_ip}:${dest_port}"
                                 iptables -t nat -A POSTROUTING -p udp -d "$dest_ip" --dport "$dest_port" -j MASQUERADE
+                                # 添加UFW放行规则
+                                ufw allow proto tcp to "$dest_ip" port "$dest_port" comment "$rule_comment (TCP)"
+                                ufw allow proto udp to "$dest_ip" port "$dest_port" comment "$rule_comment (UDP)"
                                 ;;
                         esac
-
-                        # 启用IP转发
-                        sysctl -w net.ipv4.ip_forward=1
-                        echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
 
                         # 保存规则
                         iptables-save > /etc/iptables/rules.v4
@@ -531,26 +562,80 @@ port_forwarding() {
                 fi
                 ;;
             2) # 查看端口转发规则
-                echo "当前端口转发规则:"
-                iptables -t nat -L PREROUTING -n -v
+                echo "当前NAT端口转发规则:"
+                iptables -t nat -L PREROUTING -n -v --line-numbers
+                
+                echo -e "\n当前UFW转发放行规则:"
+                ufw status numbered | grep "PortForwarding"
+                
+                if ! iptables -t nat -L PREROUTING -n | grep -q "DNAT"; then
+                    echo "ℹ️ 没有活动的端口转发规则"
+                fi
+                
                 read -n 1 -s -r -p "按任意键继续..."
                 ;;
             3) # 删除端口转发规则
-                echo "当前端口转发规则:"
+                echo "当前NAT端口转发规则:"
                 iptables -t nat -L PREROUTING -n -v --line-numbers
+                
+                if ! iptables -t nat -L PREROUTING -n | grep -q "DNAT"; then
+                    echo "ℹ️ 没有活动的端口转发规则"
+                    read -n 1 -s -r -p "按任意键继续..."
+                    continue
+                fi
+                
                 echo -n "请输入要删除的规则编号: "
                 read rule_num
+                
                 if [ -n "$rule_num" ]; then
-                    # 确保/etc/iptables目录存在
-                    if [ ! -d "/etc/iptables" ]; then
-                        mkdir -p /etc/iptables
-                        echo "✅ 创建目录: /etc/iptables"
+                    # 获取目标信息
+                    rule_info=$(iptables -t nat -L PREROUTING -n --line-numbers | grep "^$rule_num" | grep "DNAT")
+                    
+                    if [ -z "$rule_info" ]; then
+                        echo "❌ 无效的规则编号"
+                        sleep 1
+                        continue
                     fi
-
+                    
+                    # 提取目标IP和端口
+                    dest_info=$(echo "$rule_info" | awk '{for(i=1;i<=NF;i++) if($i=="to:") print $(i+1)}')
+                    dest_ip=$(echo "$dest_info" | cut -d: -f1)
+                    dest_port=$(echo "$dest_info" | cut -d: -f2)
+                    protocol=$(echo "$rule_info" | awk '{print $3}') # tcp/udp
+                    
+                    # 删除NAT规则
                     iptables -t nat -D PREROUTING "$rule_num"
+                    
+                    # 删除对应的POSTROUTING规则
+                    post_rule_num=$(iptables -t nat -L POSTROUTING -n --line-numbers | grep "$dest_ip.*$dest_port" | grep "$protocol" | awk '{print $1}')
+                    if [ -n "$post_rule_num" ]; then
+                        iptables -t nat -D POSTROUTING "$post_rule_num"
+                    fi
+                    
+                    # 保存规则
                     iptables-save > /etc/iptables/rules.v4
+                    
+                    # 删除UFW规则
+                    ufw_rules=$(ufw status numbered | grep "PortForwarding.*$dest_ip:$dest_port")
+                    if [ -n "$ufw_rules" ]; then
+                        echo -e "\n关联的UFW规则:"
+                        echo "$ufw_rules"
+                        
+                        # 删除所有匹配的UFW规则
+                        while IFS= read -r line; do
+                            if [[ "$line" =~ \[([0-9]+)\] ]]; then
+                                rule_idx="${BASH_REMATCH[1]}"
+                                echo "y" | ufw delete "$rule_idx"
+                            fi
+                        done <<< "$ufw_rules"
+                    fi
+                    
                     echo "✅ 规则 $rule_num 已删除"
                     echo "⚠️ 注意: 变更将在重载防火墙后生效"
+                    
+                    # 检查是否还有转发规则
+                    check_forwarding_rules
+                    
                     read -n 1 -s -r -p "按任意键继续..."
                 else
                     echo "❌ 规则编号不能为空"
