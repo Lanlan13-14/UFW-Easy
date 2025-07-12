@@ -1,26 +1,52 @@
 #!/usr/bin/env bash
 
 # ===========================================================
-# 增强版 UFW 防火墙管理工具
-# 版本: 5.0
+# 增强版 UFW 防火墙管理工具 (可直接通过 ufw-easy 调用)
+# 版本: 6.0
 # 项目地址: https://github.com/Lanlan13-14/UFW-Easy
 # 特点: 
-#   - 自动安装 UFW 和 iptables-persistent
+#   - 可直接通过 sudo ufw-easy 运行
+#   - 自动安装到系统路径
 #   - 完整的端口转发支持
 #   - 自动管理 IP 转发状态
-#   - 智能规则清理
-#   - 所有规则变更需手动重载才生效
 # ===========================================================
 
 # 项目信息
 GITHUB_REPO="https://github.com/Lanlan13-14/UFW-Easy"
-SCRIPT_URL="https://raw.githubusercontent.com/Lanlan13-14/UFW-Easy/main/ufw_easy.sh"
+SCRIPT_URL="https://raw.githubusercontent.com/Lanlan13-14/UFW-Easy/main/ufw-easy"
 UNINSTALL_URL="https://raw.githubusercontent.com/Lanlan13-14/UFW-Easy/main/uninstall.sh"
+
+# 安装路径
+INSTALL_PATH="/usr/local/bin/ufw-easy"
 
 # 检查 root 权限
 check_root() {
     if [ "$(id -u)" -ne 0 ]; then
         echo "❌ 请使用 sudo 或以 root 用户运行此脚本"
+        exit 1
+    fi
+}
+
+# 安装脚本到系统路径
+install_self() {
+    echo "🔧 正在安装脚本到系统路径..."
+    local script_path
+    script_path=$(realpath "$0")
+    
+    # 如果已经安装且是同一个文件，跳过
+    if [ -f "$INSTALL_PATH" ] && [ "$(realpath "$INSTALL_PATH")" = "$script_path" ]; then
+        echo "ℹ️ 脚本已经安装在 $INSTALL_PATH"
+        return
+    fi
+    
+    # 复制到系统路径
+    cp "$script_path" "$INSTALL_PATH"
+    chmod 755 "$INSTALL_PATH"
+    
+    if [ $? -eq 0 ]; then
+        echo "✅ 安装成功！您现在可以通过 'sudo ufw-easy' 运行本程序。"
+    else
+        echo "❌ 安装失败，请检查权限。"
         exit 1
     fi
 }
@@ -46,7 +72,7 @@ install_ufw() {
 show_menu() {
     clear
     echo "====================================================="
-    echo "          增强版 UFW 防火墙管理工具 (v5.0)"
+    echo "          UFW 防火墙管理工具 (sudo ufw-easy)"
     echo "  项目地址: ${GITHUB_REPO}"
     echo "====================================================="
     ufw_status=$(ufw status | grep -i status)
@@ -727,22 +753,19 @@ update_script() {
     clear
     echo "===================== 更新脚本 ===================="
     echo "正在检查更新..."
-
-    # 获取当前脚本路径
-    CURRENT_SCRIPT=$(readlink -f "$0")
-
+    
     # 备份当前脚本
-    BACKUP_FILE="${CURRENT_SCRIPT}.bak-$(date +%Y%m%d%H%M%S)"
-    cp "$CURRENT_SCRIPT" "$BACKUP_FILE"
+    BACKUP_FILE="${INSTALL_PATH}.bak-$(date +%Y%m%d%H%M%S)"
+    cp "$INSTALL_PATH" "$BACKUP_FILE"
     echo "✅ 当前脚本已备份到: $BACKUP_FILE"
 
     # 下载最新版本
     echo "下载最新版本..."
-    wget -q -O "$CURRENT_SCRIPT" "$SCRIPT_URL"
+    wget -q -O "$INSTALL_PATH" "$SCRIPT_URL"
 
     if [ $? -eq 0 ]; then
         # 设置执行权限
-        chmod +x "$CURRENT_SCRIPT"
+        chmod 755 "$INSTALL_PATH"
         echo "✅ 脚本已更新到最新版本"
         echo "⚠️ 请重新运行脚本以使更新生效"
         echo "项目地址: $GITHUB_REPO"
@@ -753,15 +776,15 @@ update_script() {
 
         if [ -z "$restart_choice" ] || [ "$restart_choice" = "y" ] || [ "$restart_choice" = "Y" ]; then
             echo "🔄 重新运行脚本..."
-            exec "$CURRENT_SCRIPT"
+            exec sudo ufw-easy
         else
-            echo "ℹ️ 您可以选择稍后手动运行: sudo $CURRENT_SCRIPT"
+            echo "ℹ️ 您可以选择稍后手动运行: sudo ufw-easy"
             exit 0
         fi
     else
         echo "❌ 更新失败，请检查网络连接"
         echo "已恢复备份: $BACKUP_FILE"
-        mv "$BACKUP_FILE" "$CURRENT_SCRIPT"
+        mv "$BACKUP_FILE" "$INSTALL_PATH"
         echo "---------------------------------------------------"
         read -n 1 -s -r -p "按任意键返回主菜单..."
     fi
@@ -778,9 +801,23 @@ uninstall_script() {
     read confirm
 
     if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
-        echo "正在执行卸载脚本..."
-        # 执行远程卸载脚本
-        bash -c "$(curl -sL $UNINSTALL_URL)"
+        # 删除安装的脚本
+        if [ -f "$INSTALL_PATH" ]; then
+            rm -f "$INSTALL_PATH"
+            echo "✅ 已删除安装的脚本: $INSTALL_PATH"
+        fi
+        
+        # 询问是否卸载UFW
+        echo -n "是否要卸载 UFW 防火墙? [y/N]: "
+        read uninstall_ufw
+        if [ "$uninstall_ufw" = "y" ] || [ "$uninstall_ufw" = "Y" ]; then
+            apt remove -y ufw iptables-persistent
+            echo "✅ UFW 和相关组件已卸载"
+        else
+            echo "ℹ️ 保留了 UFW 防火墙"
+        fi
+        
+        echo "✅ 卸载完成"
         exit 0
     else
         echo "❌ 操作已取消"
@@ -792,6 +829,12 @@ uninstall_script() {
 # 主函数
 main() {
     check_root
+    
+    # 首次运行时自动安装到系统路径
+    if [ ! -f "$INSTALL_PATH" ]; then
+        install_self
+    fi
+    
     install_ufw
 
     while true; do
