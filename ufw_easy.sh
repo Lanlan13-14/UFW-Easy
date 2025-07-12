@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 
 # ===========================================================
-# 增强版 UFW 防火墙管理工具 (可直接通过 ufw-easy 调用)
-# 版本: 6.0
+# 增强版 UFW 防火墙管理工具
+# 版本: 6.1
 # 项目地址: https://github.com/Lanlan13-14/UFW-Easy
 # 特点: 
 #   - 可直接通过 sudo ufw-easy 运行
@@ -32,17 +32,17 @@ install_self() {
     echo "🔧 正在安装脚本到系统路径..."
     local script_path
     script_path=$(realpath "$0")
-    
+
     # 如果已经安装且是同一个文件，跳过
     if [ -f "$INSTALL_PATH" ] && [ "$(realpath "$INSTALL_PATH")" = "$script_path" ]; then
         echo "ℹ️ 脚本已经安装在 $INSTALL_PATH"
         return
     fi
-    
+
     # 复制到系统路径
     cp "$script_path" "$INSTALL_PATH"
     chmod 755 "$INSTALL_PATH"
-    
+
     if [ $? -eq 0 ]; then
         echo "✅ 安装成功！您现在可以通过 'sudo ufw-easy' 运行本程序。"
     else
@@ -58,11 +58,11 @@ install_ufw() {
         apt update
         apt install -y ufw iptables-persistent netfilter-persistent
         echo "✅ UFW 和相关组件已安装"
-        
+
         # 初始禁用 UFW
         ufw disable >/dev/null 2>&1
         echo "⚠️ UFW 已禁用（等待手动启用）"
-        
+
         # 创建 iptables 目录
         mkdir -p /etc/iptables
     fi
@@ -470,7 +470,8 @@ ensure_ip_forwarding() {
 
 # 检查并关闭IP转发（如果没有转发规则）
 check_forwarding_rules() {
-    if ! iptables -t nat -L PREROUTING -n | grep -q "DNAT"; then
+    # 只检查用户添加的规则，忽略系统规则
+    if ! iptables -t nat -L PREROUTING -n | grep 'DNAT' | grep -v 'DOCKER' | grep -q "DNAT"; then
         # 没有转发规则时关闭IP转发
         sed -i '/net.ipv4.ip_forward=1/d' /etc/sysctl.conf
         sysctl -p >/dev/null
@@ -482,7 +483,7 @@ check_forwarding_rules() {
 port_forwarding() {
     # 确保目录存在
     mkdir -p /etc/iptables
-    
+
     while true; do
         clear
         echo "==================== 端口转发设置 ===================="
@@ -506,7 +507,7 @@ port_forwarding() {
                 if [ -n "$src_port" ] && [ -n "$dest_ip" ] && [ -n "$dest_port" ]; then
                     # 确保IP转发已开启
                     ensure_ip_forwarding
-                    
+
                     # 协议选择
                     while true; do
                         clear
@@ -576,7 +577,6 @@ port_forwarding() {
 
                         # 保存规则
                         iptables-save > /etc/iptables/rules.v4
-
                         echo "✅ 端口转发已添加: ${src_port}(${protocol}) -> ${dest_ip}:${dest_port}"
                         echo "⚠️ 注意: 变更将在重载防火墙后生效"
                         read -n 1 -s -r -p "按任意键继续..."
@@ -589,79 +589,83 @@ port_forwarding() {
                 ;;
             2) # 查看端口转发规则
                 echo "当前NAT端口转发规则:"
-                iptables -t nat -L PREROUTING -n -v --line-numbers
+                # 只显示DNAT规则，过滤掉其他系统规则
+                iptables -t nat -L PREROUTING -n -v --line-numbers | grep -E 'DNAT|Chain' | grep -A100 'Chain'
                 
                 echo -e "\n当前UFW转发放行规则:"
                 ufw status numbered | grep "PortForwarding"
-                
+
                 if ! iptables -t nat -L PREROUTING -n | grep -q "DNAT"; then
                     echo "ℹ️ 没有活动的端口转发规则"
                 fi
-                
+
                 read -n 1 -s -r -p "按任意键继续..."
                 ;;
             3) # 删除端口转发规则
-                echo "当前NAT端口转发规则:"
-                iptables -t nat -L PREROUTING -n -v --line-numbers
+                echo "当前NAT端口转发规则 (仅显示用户添加的规则):"
+                # 只显示用户添加的规则
+                iptables -t nat -L PREROUTING -n -v --line-numbers | grep 'DNAT' | grep -v 'DOCKER'
                 
+                # 检查是否有规则
                 if ! iptables -t nat -L PREROUTING -n | grep -q "DNAT"; then
                     echo "ℹ️ 没有活动的端口转发规则"
                     read -n 1 -s -r -p "按任意键继续..."
                     continue
                 fi
-                
+
                 echo -n "请输入要删除的规则编号: "
                 read rule_num
-                
+
                 if [ -n "$rule_num" ]; then
-                    # 获取目标信息
-                    rule_info=$(iptables -t nat -L PREROUTING -n --line-numbers | grep "^$rule_num" | grep "DNAT")
-                    
+                    # 获取目标信息 (只处理用户规则)
+                    rule_info=$(iptables -t nat -L PREROUTING -n --line-numbers | grep "^$rule_num" | grep 'DNAT' | grep -v 'DOCKER')
+
                     if [ -z "$rule_info" ]; then
-                        echo "❌ 无效的规则编号"
+                        echo "❌ 无效的规则编号或系统规则不可删除"
                         sleep 1
                         continue
                     fi
-                    
+
                     # 提取目标IP和端口
                     dest_info=$(echo "$rule_info" | awk '{for(i=1;i<=NF;i++) if($i=="to:") print $(i+1)}')
                     dest_ip=$(echo "$dest_info" | cut -d: -f1)
                     dest_port=$(echo "$dest_info" | cut -d: -f2)
                     protocol=$(echo "$rule_info" | awk '{print $3}') # tcp/udp
-                    
+
                     # 删除NAT规则
                     iptables -t nat -D PREROUTING "$rule_num"
-                    
+
                     # 删除对应的POSTROUTING规则
-                    post_rule_num=$(iptables -t nat -L POSTROUTING -n --line-numbers | grep "$dest_ip.*$dest_port" | grep "$protocol" | awk '{print $1}')
-                    if [ -n "$post_rule_num" ]; then
-                        iptables -t nat -D POSTROUTING "$post_rule_num"
-                    fi
-                    
+                    post_rule_nums=$(iptables -t nat -L POSTROUTING -n --line-numbers | grep "$dest_ip.*$dest_port" | grep "$protocol" | awk '{print $1}' | sort -rn)
+                    for num in $post_rule_nums; do
+                        iptables -t nat -D POSTROUTING "$num"
+                    done
+
                     # 保存规则
                     iptables-save > /etc/iptables/rules.v4
-                    
-                    # 删除UFW规则
+
+                    # 删除UFW规则 (精确匹配注释)
                     ufw_rules=$(ufw status numbered | grep "PortForwarding.*$dest_ip:$dest_port")
                     if [ -n "$ufw_rules" ]; then
                         echo -e "\n关联的UFW规则:"
                         echo "$ufw_rules"
-                        
-                        # 删除所有匹配的UFW规则
+
+                        # 删除所有匹配的UFW规则 (从高编号开始删除)
+                        rules_to_delete=$(echo "$ufw_rules" | tac)
                         while IFS= read -r line; do
                             if [[ "$line" =~ \[([0-9]+)\] ]]; then
                                 rule_idx="${BASH_REMATCH[1]}"
                                 echo "y" | ufw delete "$rule_idx"
                             fi
-                        done <<< "$ufw_rules"
+                        done <<< "$rules_to_delete"
                     fi
-                    
+
                     echo "✅ 规则 $rule_num 已删除"
                     echo "⚠️ 注意: 变更将在重载防火墙后生效"
-                    
+
                     # 检查是否还有转发规则
                     check_forwarding_rules
-                    
+
                     read -n 1 -s -r -p "按任意键继续..."
                 else
                     echo "❌ 规则编号不能为空"
@@ -753,7 +757,7 @@ update_script() {
     clear
     echo "===================== 更新脚本 ===================="
     echo "正在检查更新..."
-    
+
     # 备份当前脚本
     BACKUP_FILE="${INSTALL_PATH}.bak-$(date +%Y%m%d%H%M%S)"
     cp "$INSTALL_PATH" "$BACKUP_FILE"
@@ -806,7 +810,7 @@ uninstall_script() {
             rm -f "$INSTALL_PATH"
             echo "✅ 已删除安装的脚本: $INSTALL_PATH"
         fi
-        
+
         # 询问是否卸载UFW
         echo -n "是否要卸载 UFW 防火墙? [y/N]: "
         read uninstall_ufw
@@ -816,7 +820,7 @@ uninstall_script() {
         else
             echo "ℹ️ 保留了 UFW 防火墙"
         fi
-        
+
         echo "✅ 卸载完成"
         exit 0
     else
@@ -829,12 +833,12 @@ uninstall_script() {
 # 主函数
 main() {
     check_root
-    
+
     # 首次运行时自动安装到系统路径
     if [ ! -f "$INSTALL_PATH" ]; then
         install_self
     fi
-    
+
     install_ufw
 
     while true; do
