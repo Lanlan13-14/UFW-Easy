@@ -2,13 +2,14 @@
 
 # ===========================================================
 # 增强版 UFW 防火墙管理工具
-# 版本: 6.1
+# 版本: 6.2
 # 项目地址: https://github.com/Lanlan13-14/UFW-Easy
 # 特点: 
 #   - 可直接通过 sudo ufw-easy 运行
 #   - 自动安装到系统路径
 #   - 完整的端口转发支持
 #   - 自动管理 IP 转发状态
+#   - 智能删除端口转发规则及关联的UFW规则
 # ===========================================================
 
 # 项目信息
@@ -591,7 +592,7 @@ port_forwarding() {
                 echo "当前NAT端口转发规则:"
                 # 只显示DNAT规则，过滤掉其他系统规则
                 iptables -t nat -L PREROUTING -n -v --line-numbers | grep -E 'DNAT|Chain' | grep -A100 'Chain'
-                
+
                 echo -e "\n当前UFW转发放行规则:"
                 ufw status numbered | grep "PortForwarding"
 
@@ -605,7 +606,7 @@ port_forwarding() {
                 echo "当前NAT端口转发规则 (仅显示用户添加的规则):"
                 # 只显示用户添加的规则
                 iptables -t nat -L PREROUTING -n -v --line-numbers | grep 'DNAT' | grep -v 'DOCKER'
-                
+
                 # 检查是否有规则
                 if ! iptables -t nat -L PREROUTING -n | grep -q "DNAT"; then
                     echo "ℹ️ 没有活动的端口转发规则"
@@ -645,16 +646,19 @@ port_forwarding() {
                     iptables-save > /etc/iptables/rules.v4
 
                     # 删除UFW规则 (精确匹配注释)
-                    ufw_rules=$(ufw status numbered | grep "PortForwarding.*$dest_ip:$dest_port")
+                    comment_prefix="PortForwarding:"
+                    ufw_rules=$(ufw status numbered | grep "$comment_prefix.*$dest_ip:$dest_port")
+                    
                     if [ -n "$ufw_rules" ]; then
                         echo -e "\n关联的UFW规则:"
                         echo "$ufw_rules"
-
+                        
                         # 删除所有匹配的UFW规则 (从高编号开始删除)
                         rules_to_delete=$(echo "$ufw_rules" | tac)
                         while IFS= read -r line; do
                             if [[ "$line" =~ \[([0-9]+)\] ]]; then
                                 rule_idx="${BASH_REMATCH[1]}"
+                                echo "正在删除UFW规则 $rule_idx: $line"
                                 echo "y" | ufw delete "$rule_idx"
                             fi
                         done <<< "$rules_to_delete"
