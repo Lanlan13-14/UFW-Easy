@@ -54,18 +54,27 @@ install_self() {
 
 # 安装 UFW（如果未安装）
 install_ufw() {
-    if ! command -v ufw &> /dev/null; then
+    if ! command -v ufw &>/dev/null; then
         echo "🔧 安装 UFW 防火墙和必要组件..."
-        apt update
-        apt install -y ufw iptables-persistent netfilter-persistent
-        echo "✅ UFW 和相关组件已安装"
 
-        # 初始禁用 UFW
+        apt update
+
+        # 提前设置 iptables-persistent 的 debconf 回答，避免安装失败
+        echo iptables-persistent iptables-persistent/autosave_v4 boolean true | debconf-set-selections
+        echo iptables-persistent iptables-persistent/autosave_v6 boolean true | debconf-set-selections
+
+        DEBIAN_FRONTEND=noninteractive apt install -y ufw iptables-persistent netfilter-persistent
+
+        if ! command -v ufw &>/dev/null; then
+            echo "❌ UFW 安装失败，请检查网络或包管理器状态"
+            return 1
+        fi
+
+        echo "✅ UFW 和相关组件已安装"
         ufw disable >/dev/null 2>&1
         echo "⚠️ UFW 已禁用（等待手动启用）"
-
-        # 创建 iptables 目录
-        mkdir -p /etc/iptables
+    else
+        echo "ℹ️ UFW 已安装，跳过安装步骤"
     fi
 }
 
