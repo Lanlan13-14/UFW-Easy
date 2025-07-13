@@ -1,7 +1,7 @@
 # UFW-Easy
 ### 1. 安装
 ```bash
-sudo bash -c 'wget -O /usr/local/bin/ufw-easy https://raw.githubusercontent.com/Lanlan13-14/UFW-Easy/refs/heads/main/ufw_easy.sh && chmod +x /usr/local/bin/ufw-easy && ufw-easy'
+sudo bash -c 'wget -O /usr/local/bin/ufw-easy https://raw.githubusercontent.com/Lanlan13-14/UFW-Easy/main/ufw_easy.sh && chmod +x /usr/local/bin/ufw-easy && ufw-easy'
 ```
 ### 已安装？执行
 ```
@@ -10,7 +10,7 @@ sudo ufw-easy
 ### 卸载
 ###### 本步骤已集成于ufw-easy可直接输入ufw-easy选择11运行，效果与此处卸载脚本一致
 ```
-sudo bash -c "$(curl -sL https://raw.githubusercontent.com/Lanlan13-14/UFW-Easy/refs/heads/main/uninstall.sh)"
+sudo bash -c "$(curl -sL https://raw.githubusercontent.com/Lanlan13-14/UFW-Easy/main/uninstall.sh)"
 ```
 
 ### 2. 添加规则
