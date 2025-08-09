@@ -44,6 +44,7 @@ show_menu() {
     echo "====================================================="
     echo "          增强版 UFW 防火墙管理工具"
     echo "  项目地址: ${GITHUB_REPO}"
+    echo "          版本: 5.0"
     echo "====================================================="
     ufw_status=$(ufw status | grep -i status)
     echo " 当前状态: ${ufw_status}"
@@ -431,16 +432,13 @@ view_app_profiles() {
 # 端口转发设置 - 使用新脚本
 port_forwarding() {
     clear
-    echo "==================== 端口转发设置 ===================="
     echo "正在下载并执行端口转发脚本..."
-    echo "项目地址: https://github.com/bqlpfy/ssr"
-    echo "-----------------------------------------------------"
     
     # 临时脚本路径
-    TEMP_SCRIPT="/tmp/iptables_forward.sh"
+    TEMP_SCRIPT="/tmp/port_forward.sh"
     
     # 下载脚本
-    curl -L -o "$TEMP_SCRIPT" https://raw.githubusercontent.com/bqlpfy/ssr/refs/heads/master/iptables.sh
+    curl -L -o "$TEMP_SCRIPT" https://raw.githubusercontent.com/Lanlan13-14/UFW-Easy/refs/heads/main/port_forward.sh
     
     if [ $? -ne 0 ]; then
         echo "❌ 下载端口转发脚本失败，请检查网络连接"
@@ -454,7 +452,6 @@ port_forwarding() {
     # 执行脚本
     "$TEMP_SCRIPT"
     
-    echo "-----------------------------------------------------"
     echo "端口转发脚本执行完成"
     read -n 1 -s -r -p "按任意键返回主菜单..."
 }
