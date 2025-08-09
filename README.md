@@ -35,5 +35,5 @@ sudo bash -c "$(curl -sL https://raw.githubusercontent.com/Lanlan13-14/UFW-Easy/
 5. **如果没有安装UFW会默认安装**
 
 ## 特别感谢
-[bqlpfy](https://github.com/bqlpfy/ssr)
+#### [bqlpfy](https://github.com/bqlpfy/ssr)
 
