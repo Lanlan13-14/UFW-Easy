@@ -2,7 +2,7 @@
 
 # ===========================================================
 # 增强版 UFW 防火墙管理工具
-# 版本: 4.9
+# 版本: 5.0
 # 项目地址: https://github.com/Lanlan13-14/UFW-Easy
 # 特点: 
 #   - 自动安装 UFW 但不自动启用
@@ -394,7 +394,7 @@ delete_rule() {
         # 智能识别不同格式的规则编号
         # 处理 [1]、[ 1] 或 1 等格式
         cleaned_num=$(echo "$rule_num" | tr -d '[] ' | tr -cd '0-9')
-        
+
         if [ -z "$cleaned_num" ]; then
             echo "❌ 无效的规则编号: $rule_num"
         elif ufw status numbered | grep -q "^\[ *$cleaned_num\]"; then
@@ -428,142 +428,35 @@ view_app_profiles() {
     read -n 1 -s -r -p "按任意键返回主菜单..."
 }
 
-# 端口转发设置
+# 端口转发设置 - 使用新脚本
 port_forwarding() {
-    while true; do
-        clear
-        echo "==================== 端口转发设置 ===================="
-        echo " 1. 添加端口转发规则"
-        echo " 2. 查看当前端口转发规则"
-        echo " 3. 删除端口转发规则"
-        echo " 0. 返回主菜单"
-        echo "-----------------------------------------------------"
-        echo -n "请选择操作 [0-3]: "
-        read choice
-
-        case $choice in
-            1) # 添加端口转发
-                echo -n "请输入源端口: "
-                read src_port
-                echo -n "请输入目标IP: "
-                read dest_ip
-                echo -n "请输入目标端口: "
-                read dest_port
-
-                if [ -n "$src_port" ] && [ -n "$dest_ip" ] && [ -n "$dest_port" ]; then
-                    # 复用协议选择菜单
-                    while true; do
-                        clear
-                        echo "==================== 协议选择 ===================="
-                        echo " 源端口: $src_port"
-                        echo " 目标: $dest_ip:$dest_port"
-                        echo "-------------------------------------------------"
-                        echo " 1. TCP"
-                        echo " 2. UDP"
-                        echo " 3. TCP+UDP"
-                        echo " 0. 返回"
-                        echo "================================================="
-                        echo -n "请选择协议 [0-3]: "
-                        read protocol_choice
-
-                        # 确保/etc/iptables目录存在
-                        if [ ! -d "/etc/iptables" ]; then
-                            mkdir -p /etc/iptables
-                            echo "✅ 创建目录: /etc/iptables"
-                        fi
-
-                        case $protocol_choice in
-                            1) 
-                                protocol="tcp"
-                                # 添加转发规则
-                                iptables -t nat -A PREROUTING -p tcp --dport "$src_port" -j DNAT --to-destination "${dest_ip}:${dest_port}"
-                                iptables -t nat -A POSTROUTING -p tcp -d "$dest_ip" --dport "$dest_port" -j MASQUERADE
-                                ;;
-                            2) 
-                                protocol="udp"
-                                # 添加转发规则
-                                iptables -t nat -A PREROUTING -p udp --dport "$src_port" -j DNAT --to-destination "${dest_ip}:${dest_port}"
-                                iptables -t nat -A POSTROUTING -p udp -d "$dest_ip" --dport "$dest_port" -j MASQUERADE
-                                ;;
-                            3) 
-                                protocol="tcp+udp"
-                                # 添加TCP转发规则
-                                iptables -t nat -A PREROUTING -p tcp --dport "$src_port" -j DNAT --to-destination "${dest_ip}:${dest_port}"
-                                iptables -t nat -A POSTROUTING -p tcp -d "$dest_ip" --dport "$dest_port" -j MASQUERADE
-
-                                # 添加UDP转发规则
-                                iptables -t nat -A PREROUTING -p udp --dport "$src_port" -j DNAT --to-destination "${dest_ip}:${dest_port}"
-                                iptables -t nat -A POSTROUTING -p udp -d "$dest_ip" --dport "$dest_port" -j MASQUERADE
-                                ;;
-                            0) 
-                                echo "❌ 操作已取消"
-                                sleep 1
-                                continue 2
-                                ;;
-                            *) 
-                                echo "❌ 无效选择，使用默认值: TCP+UDP"
-                                protocol="tcp+udp"
-                                # 添加TCP转发规则
-                                iptables -t nat -A PREROUTING -p tcp --dport "$src_port" -j DNAT --to-destination "${dest_ip}:${dest_port}"
-                                iptables -t nat -A POSTROUTING -p tcp -d "$dest_ip" --dport "$dest_port" -j MASQUERADE
-
-                                # 添加UDP转发规则
-                                iptables -t nat -A PREROUTING -p udp --dport "$src_port" -j DNAT --to-destination "${dest_ip}:${dest_port}"
-                                iptables -t nat -A POSTROUTING -p udp -d "$dest_ip" --dport "$dest_port" -j MASQUERADE
-                                ;;
-                        esac
-
-                        # 启用IP转发
-                        sysctl -w net.ipv4.ip_forward=1
-                        echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
-
-                        # 保存规则
-                        iptables-save > /etc/iptables/rules.v4
-
-                        echo "✅ 端口转发已添加: ${src_port}(${protocol}) -> ${dest_ip}:${dest_port}"
-                        echo "⚠️ 注意: 变更将在重载防火墙后生效"
-                        read -n 1 -s -r -p "按任意键继续..."
-                        break
-                    done
-                else
-                    echo "❌ 所有字段都必须填写"
-                    sleep 1
-                fi
-                ;;
-            2) # 查看端口转发规则
-                echo "当前端口转发规则:"
-                iptables -t nat -L PREROUTING -n -v
-                read -n 1 -s -r -p "按任意键继续..."
-                ;;
-            3) # 删除端口转发规则
-                echo "当前端口转发规则:"
-                iptables -t nat -L PREROUTING -n -v --line-numbers
-                echo -n "请输入要删除的规则编号: "
-                read rule_num
-                if [ -n "$rule_num" ]; then
-                    # 确保/etc/iptables目录存在
-                    if [ ! -d "/etc/iptables" ]; then
-                        mkdir -p /etc/iptables
-                        echo "✅ 创建目录: /etc/iptables"
-                    fi
-
-                    iptables -t nat -D PREROUTING "$rule_num"
-                    iptables-save > /etc/iptables/rules.v4
-                    echo "✅ 规则 $rule_num 已删除"
-                    echo "⚠️ 注意: 变更将在重载防火墙后生效"
-                    read -n 1 -s -r -p "按任意键继续..."
-                else
-                    echo "❌ 规则编号不能为空"
-                    sleep 1
-                fi
-                ;;
-            0) return ;;
-            *) 
-                echo "❌ 无效选择"
-                sleep 1
-                ;;
-        esac
-    done
+    clear
+    echo "==================== 端口转发设置 ===================="
+    echo "正在下载并执行端口转发脚本..."
+    echo "项目地址: https://github.com/bqlpfy/ssr"
+    echo "-----------------------------------------------------"
+    
+    # 临时脚本路径
+    TEMP_SCRIPT="/tmp/iptables_forward.sh"
+    
+    # 下载脚本
+    curl -L -o "$TEMP_SCRIPT" https://raw.githubusercontent.com/bqlpfy/ssr/refs/heads/master/iptables.sh
+    
+    if [ $? -ne 0 ]; then
+        echo "❌ 下载端口转发脚本失败，请检查网络连接"
+        read -n 1 -s -r -p "按任意键返回主菜单..."
+        return
+    fi
+    
+    # 设置执行权限
+    chmod +x "$TEMP_SCRIPT"
+    
+    # 执行脚本
+    "$TEMP_SCRIPT"
+    
+    echo "-----------------------------------------------------"
+    echo "端口转发脚本执行完成"
+    read -n 1 -s -r -p "按任意键返回主菜单..."
 }
 
 # 启用防火墙并应用规则
