@@ -34,3 +34,6 @@ sudo bash -c "$(curl -sL https://raw.githubusercontent.com/Lanlan13-14/UFW-Easy/
 4. **规则顺序**：使用 `show_status` 查看规则顺序确认优先级
 5. **如果没有安装UFW会默认安装**
 
+## 特别感谢
+https://github.com/bqlpfy/ssr
+
