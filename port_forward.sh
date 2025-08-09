@@ -1,6 +1,21 @@
 #!/bin/bash
 SCRIPT_TAG="PortForwardScript"
 
+# 协议选择函数
+select_protocol() {
+    echo "请选择协议："
+    echo "1. TCP"
+    echo "2. UDP"
+    echo "3. TCP + UDP"
+    read -p "输入选择: " proto_choice
+    case $proto_choice in
+        1) PROTOS=("tcp") ;;
+        2) PROTOS=("udp") ;;
+        3) PROTOS=("tcp" "udp") ;;
+        *) echo "❌ 无效选择，默认 TCP"; PROTOS=("tcp") ;;
+    esac
+}
+
 # 显示菜单
 show_menu() {
     echo "=============================="
@@ -20,17 +35,17 @@ add_single_port_forward() {
     read -p "请输入本机监听端口: " LOCAL_PORT
     read -p "请输入目标服务器 IP: " TARGET_IP
     read -p "请输入目标服务器端口: " TARGET_PORT
-    read -p "请输入协议 (tcp/udp): " PROTO
+    select_protocol
 
-    # 添加 NAT 表 PREROUTING 规则
-    iptables -t nat -A PREROUTING -p $PROTO --dport $LOCAL_PORT \
-        -j DNAT --to-destination $TARGET_IP:$TARGET_PORT \
-        -m comment --comment "$SCRIPT_TAG"
-    # 添加 POSTROUTING 规则
-    iptables -t nat -A POSTROUTING -p $PROTO -d $TARGET_IP --dport $TARGET_PORT \
-        -j MASQUERADE -m comment --comment "$SCRIPT_TAG"
+    for PROTO in "${PROTOS[@]}"; do
+        iptables -t nat -A PREROUTING -p $PROTO --dport $LOCAL_PORT \
+            -j DNAT --to-destination $TARGET_IP:$TARGET_PORT \
+            -m comment --comment "$SCRIPT_TAG"
+        iptables -t nat -A POSTROUTING -p $PROTO -d $TARGET_IP --dport $TARGET_PORT \
+            -j MASQUERADE -m comment --comment "$SCRIPT_TAG"
+    done
 
-    echo "✅ 已添加单个端口转发: 本机 $LOCAL_PORT → $TARGET_IP:$TARGET_PORT ($PROTO)"
+    echo "✅ 已添加单个端口转发: 本机 $LOCAL_PORT → $TARGET_IP:$TARGET_PORT (${PROTOS[*]})"
 }
 
 # 添加端口段转发
@@ -39,15 +54,18 @@ add_port_range_forward() {
     read -p "请输入本机结束端口: " LOCAL_END
     read -p "请输入目标服务器 IP: " TARGET_IP
     read -p "请输入目标起始端口: " TARGET_START
-    read -p "请输入协议 (tcp/udp): " PROTO
+    select_protocol
 
-    iptables -t nat -A PREROUTING -p $PROTO --dport $LOCAL_START:$LOCAL_END \
-        -j DNAT --to-destination $TARGET_IP:$TARGET_START \
-        -m comment --comment "$SCRIPT_TAG"
-    iptables -t nat -A POSTROUTING -p $PROTO -d $TARGET_IP --dport $TARGET_START:$((TARGET_START + LOCAL_END - LOCAL_START)) \
-        -j MASQUERADE -m comment --comment "$SCRIPT_TAG"
+    for PROTO in "${PROTOS[@]}"; do
+        iptables -t nat -A PREROUTING -p $PROTO --dport $LOCAL_START:$LOCAL_END \
+            -j DNAT --to-destination $TARGET_IP:$TARGET_START \
+            -m comment --comment "$SCRIPT_TAG"
+        iptables -t nat -A POSTROUTING -p $PROTO -d $TARGET_IP \
+            --dport $TARGET_START:$((TARGET_START + LOCAL_END - LOCAL_START)) \
+            -j MASQUERADE -m comment --comment "$SCRIPT_TAG"
+    done
 
-    echo "✅ 已添加端口段转发: 本机 $LOCAL_START-$LOCAL_END → $TARGET_IP:$TARGET_START-... ($PROTO)"
+    echo "✅ 已添加端口段转发: 本机 $LOCAL_START-$LOCAL_END → $TARGET_IP:$TARGET_START-... (${PROTOS[*]})"
 }
 
 # 删除指定规则（方法 2）
