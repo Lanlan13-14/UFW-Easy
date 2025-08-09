@@ -1,112 +1,118 @@
 #!/bin/bash
-# 端口转发脚本 v3.0
-# 单端口/端口段选择 & 删除时可选择具体规则 & Emoji
-
 SCRIPT_TAG="PortForwardScript"
 
-# 持久化 IP 转发
-setup_ip_forward_persistent() {
-    echo "⚙️  启用 IP 转发..."
-    sysctl -w net.ipv4.ip_forward=1
-    if grep -q "^net.ipv4.ip_forward" /etc/sysctl.conf; then
-        sed -i "s/^net.ipv4.ip_forward.*/net.ipv4.ip_forward = 1/" /etc/sysctl.conf
-    else
-        echo "net.ipv4.ip_forward = 1" >> /etc/sysctl.conf
-    fi
+# 显示菜单
+show_menu() {
+    echo "=============================="
+    echo "🎯 端口转发管理工具"
+    echo "=============================="
+    echo "1. 添加单个端口转发"
+    echo "2. 添加端口段转发"
+    echo "3. 删除指定规则"
+    echo "4. 清空所有本脚本规则"
+    echo "5. 查看当前规则"
+    echo "0. 退出"
+    echo "=============================="
 }
 
-# 添加规则
-install_rules() {
-    echo "🚀 添加端口转发规则"
-    echo "1️⃣ 单端口转发"
-    echo "2️⃣ 端口段转发"
-    read -p "请选择 [1-2]: " choice
+# 添加单个端口转发
+add_single_port_forward() {
+    read -p "请输入本机监听端口: " LOCAL_PORT
+    read -p "请输入目标服务器 IP: " TARGET_IP
+    read -p "请输入目标服务器端口: " TARGET_PORT
+    read -p "请输入协议 (tcp/udp): " PROTO
 
-    read -p "请输入目标 IP: " B_IP
+    # 添加 NAT 表 PREROUTING 规则
+    iptables -t nat -A PREROUTING -p $PROTO --dport $LOCAL_PORT \
+        -j DNAT --to-destination $TARGET_IP:$TARGET_PORT \
+        -m comment --comment "$SCRIPT_TAG"
+    # 添加 POSTROUTING 规则
+    iptables -t nat -A POSTROUTING -p $PROTO -d $TARGET_IP --dport $TARGET_PORT \
+        -j MASQUERADE -m comment --comment "$SCRIPT_TAG"
 
-    if [ "$choice" == "1" ]; then
-        read -p "请输入端口号: " PORT
-        PORT_RANGE="$PORT"
-    elif [ "$choice" == "2" ]; then
-        read -p "请输入起始端口: " PORT_START
-        read -p "请输入结束端口: " PORT_END
-        PORT_RANGE="$PORT_START:$PORT_END"
-    else
-        echo "❌ 选择错误"
-        return
-    fi
-
-    setup_ip_forward_persistent
-
-    echo "🔗 添加 NAT 规则..."
-    iptables -t nat -A PREROUTING -p tcp --dport $PORT_RANGE -j DNAT --to-destination $B_IP -m comment --comment "$SCRIPT_TAG"
-    iptables -t nat -A POSTROUTING -p tcp -d $B_IP --dport $PORT_RANGE -j MASQUERADE -m comment --comment "$SCRIPT_TAG"
-    iptables -t nat -A PREROUTING -p udp --dport $PORT_RANGE -j DNAT --to-destination $B_IP -m comment --comment "$SCRIPT_TAG"
-    iptables -t nat -A POSTROUTING -p udp -d $B_IP --dport $PORT_RANGE -j MASQUERADE -m comment --comment "$SCRIPT_TAG"
-
-    echo "📡 添加 FORWARD 规则..."
-    iptables -I FORWARD -p tcp -d $B_IP --dport $PORT_RANGE -j ACCEPT -m comment --comment "$SCRIPT_TAG"
-    iptables -I FORWARD -p udp -d $B_IP --dport $PORT_RANGE -j ACCEPT -m comment --comment "$SCRIPT_TAG"
-
-    echo "✅ 规则添加成功"
+    echo "✅ 已添加单个端口转发: 本机 $LOCAL_PORT → $TARGET_IP:$TARGET_PORT ($PROTO)"
 }
 
-# 删除规则（方法 2：编号选择删除）
-remove_rules() {
-    echo "🗑 删除端口转发规则"
-    echo "📜 当前 NAT 规则:"
+# 添加端口段转发
+add_port_range_forward() {
+    read -p "请输入本机起始端口: " LOCAL_START
+    read -p "请输入本机结束端口: " LOCAL_END
+    read -p "请输入目标服务器 IP: " TARGET_IP
+    read -p "请输入目标起始端口: " TARGET_START
+    read -p "请输入协议 (tcp/udp): " PROTO
+
+    iptables -t nat -A PREROUTING -p $PROTO --dport $LOCAL_START:$LOCAL_END \
+        -j DNAT --to-destination $TARGET_IP:$TARGET_START \
+        -m comment --comment "$SCRIPT_TAG"
+    iptables -t nat -A POSTROUTING -p $PROTO -d $TARGET_IP --dport $TARGET_START:$((TARGET_START + LOCAL_END - LOCAL_START)) \
+        -j MASQUERADE -m comment --comment "$SCRIPT_TAG"
+
+    echo "✅ 已添加端口段转发: 本机 $LOCAL_START-$LOCAL_END → $TARGET_IP:$TARGET_START-... ($PROTO)"
+}
+
+# 删除指定规则（方法 2）
+delete_specific_rule() {
+    echo "📜 当前本脚本添加的规则:"
     mapfile -t nat_rules < <(iptables -t nat -S | grep "$SCRIPT_TAG")
     mapfile -t fwd_rules < <(iptables -S FORWARD | grep "$SCRIPT_TAG")
 
-    if [ ${#nat_rules[@]} -eq 0 ] && [ ${#fwd_rules[@]} -eq 0 ]; then
-        echo "⚠️ 没有找到任何规则"
+    all_rules=("${nat_rules[@]/#/nat }" "${fwd_rules[@]/#/filter }")
+
+    if [ ${#all_rules[@]} -eq 0 ]; then
+        echo "⚠️ 没有找到本脚本的规则"
         return
     fi
-
-    all_rules=("${nat_rules[@]/#/nat }" "${fwd_rules[@]/#/fwd }")
 
     for i in "${!all_rules[@]}"; do
         echo "$((i+1)). ${all_rules[$i]}"
     done
 
     read -p "请输入要删除的规则编号: " num
-    if [[ $num =~ ^[0-9]+$ ]] && [ $num -le ${#all_rules[@]} ] && [ $num -gt 0 ]; then
+    if [[ $num =~ ^[0-9]+$ ]] && [ $num -gt 0 ] && [ $num -le ${#all_rules[@]} ]; then
         rule="${all_rules[$((num-1))]}"
         table=${rule%% *}
         rule_str=${rule#* }
-        echo "🗑 删除: $rule_str"
+        echo "🗑 删除规则: $rule"
         iptables -t $table ${rule_str//-A/-D}
         iptables -t $table ${rule_str//-I/-D}
-        echo "✅ 删除成功"
+        echo "✅ 删除完成"
     else
         echo "❌ 输入无效"
     fi
 }
 
-# 查看规则
-show_rules() {
-    echo "📜 当前 NAT 规则:"
-    iptables -t nat -S | grep "$SCRIPT_TAG" || echo "⚠️ 没有找到 NAT 规则"
-    echo
-    echo "📜 当前 FORWARD 规则:"
-    iptables -S FORWARD | grep "$SCRIPT_TAG" || echo "⚠️ 没有找到 FORWARD 规则"
+# 清空所有本脚本规则
+clear_all_rules() {
+    echo "🗑 清空所有本脚本添加的规则..."
+    for table in nat filter; do
+        rules=$(iptables -t $table -S | grep "$SCRIPT_TAG")
+        while read -r rule; do
+            [ -n "$rule" ] && iptables -t $table ${rule//-A/-D}
+        done <<< "$rules"
+    done
+    echo "✅ 已清空"
 }
 
-# 主菜单
-while true; do
+# 查看当前规则
+list_rules() {
+    echo "📜 NAT 表规则:"
+    iptables -t nat -S | grep "$SCRIPT_TAG" || echo "（无）"
     echo
-    echo "=== 🛠 端口转发管理菜单 ==="
-    echo "1️⃣ 添加端口转发"
-    echo "2️⃣ 删除端口转发"
-    echo "3️⃣ 查看规则"
-    echo "4️⃣ 退出"
-    read -p "请选择 [1-4]: " opt
+    echo "📜 FORWARD 链规则:"
+    iptables -S FORWARD | grep "$SCRIPT_TAG" || echo "（无）"
+}
 
-    case $opt in
-        1) install_rules ;;
-        2) remove_rules ;;
-        3) show_rules ;;
-        4) echo "👋 再见"; exit ;;
-        *) echo "❌ 无效选择" ;;
+# 主循环
+while true; do
+    show_menu
+    read -p "请选择操作: " choice
+    case $choice in
+        1) add_single_port_forward ;;
+        2) add_port_range_forward ;;
+        3) delete_specific_rule ;;
+        4) clear_all_rules ;;
+        5) list_rules ;;
+        0) echo "👋 退出"; exit 0 ;;
+        *) echo "❌ 无效选项" ;;
     esac
 done
