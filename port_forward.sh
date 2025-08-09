@@ -16,7 +16,7 @@ select_protocol() {
     esac
 }
 
-# 显示菜单
+# 菜单
 show_menu() {
     echo "=============================="
     echo "🎯 端口转发管理工具"
@@ -30,12 +30,13 @@ show_menu() {
     echo "=============================="
 }
 
-# 添加单个端口转发
+# 添加单端口转发
 add_single_port_forward() {
     read -p "请输入本机监听端口: " LOCAL_PORT
     read -p "请输入目标服务器 IP: " TARGET_IP
     read -p "请输入目标服务器端口: " TARGET_PORT
-    select_protocol
+    
+    select_protocol  # 每个转发单独选协议
 
     for PROTO in "${PROTOS[@]}"; do
         iptables -t nat -A PREROUTING -p $PROTO --dport $LOCAL_PORT \
@@ -54,7 +55,8 @@ add_port_range_forward() {
     read -p "请输入本机结束端口: " LOCAL_END
     read -p "请输入目标服务器 IP: " TARGET_IP
     read -p "请输入目标起始端口: " TARGET_START
-    select_protocol
+    
+    select_protocol  # 每个转发单独选协议
 
     for PROTO in "${PROTOS[@]}"; do
         iptables -t nat -A PREROUTING -p $PROTO --dport $LOCAL_START:$LOCAL_END \
@@ -68,7 +70,7 @@ add_port_range_forward() {
     echo "✅ 已添加端口段转发: 本机 $LOCAL_START-$LOCAL_END → $TARGET_IP:$TARGET_START-... (${PROTOS[*]})"
 }
 
-# 删除指定规则（方法 2）
+# 删除指定规则
 delete_specific_rule() {
     echo "📜 当前本脚本添加的规则:"
     mapfile -t nat_rules < <(iptables -t nat -S | grep "$SCRIPT_TAG")
@@ -99,7 +101,7 @@ delete_specific_rule() {
     fi
 }
 
-# 清空所有本脚本规则
+# 清空所有规则
 clear_all_rules() {
     echo "🗑 清空所有本脚本添加的规则..."
     for table in nat filter; do
@@ -111,7 +113,7 @@ clear_all_rules() {
     echo "✅ 已清空"
 }
 
-# 查看当前规则
+# 查看规则
 list_rules() {
     echo "📜 NAT 表规则:"
     iptables -t nat -S | grep "$SCRIPT_TAG" || echo "（无）"
