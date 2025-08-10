@@ -368,7 +368,7 @@ add_advanced_rule() {
     done
 }
 
-# 删除规则（智能识别输入格式）
+# 删除规则（智能识别输入格式） - 修复点
 delete_rule() {
     clear
     echo "===================== 删除规则 ===================="
@@ -385,7 +385,8 @@ delete_rule() {
         echo -n "⚠️ 确定要删除所有规则吗? [y/N]: "
         read confirm
         if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
-            ufw reset --force
+            # 修复点：使用正确的重置命令替代 --force 参数
+            yes | ufw reset
             echo "✅ 所有规则已删除"
             echo "⚠️ 注意: 变更将在重载防火墙后生效"
         else
@@ -521,7 +522,7 @@ reset_firewall() {
     read confirm
 
     if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
-        ufw --force reset
+        yes | ufw reset
         echo "✅ 防火墙已重置"
         echo "⚠️ 注意: 变更将在重载防火墙后生效"
     else
