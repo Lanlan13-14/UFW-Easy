@@ -260,6 +260,40 @@ list_rules() {
     ip6tables -t nat -S | grep "$SCRIPT_TAG" || echo "（无）"
 }
 
+# 新增：同步 UFW 规则
+sync_ufw_rules() {
+    echo "🔄 正在同步 UFW 规则..."
+    if ! command -v ufw >/dev/null 2>&1; then
+        echo "⚠️ 未检测到 ufw 命令，跳过同步"
+        return
+    fi
+
+    for cmd in iptables ip6tables; do
+        $cmd -t nat -S | grep "$SCRIPT_TAG" | while read -r rule; do
+            proto=$(echo "$rule" | grep -oP '(?<=-p )\w+')
+            if [[ "$rule" =~ --dport[[:space:]]+([0-9]+):([0-9]+) ]]; then
+                start_port="${BASH_REMATCH[1]}"
+                end_port="${BASH_REMATCH[2]}"
+                for ((p=start_port; p<=end_port; p++)); do
+                    # 判断 UFW 是否已有规则
+                    if ! ufw status numbered | grep -qE "ALLOW[[:space:]]+.*$p/$proto"; then
+                        ufw allow "$p/$proto" comment "$SCRIPT_TAG" >/dev/null 2>&1
+                        echo "✅ 已补充 UFW 规则: $p/$proto"
+                    fi
+                done
+            elif [[ "$rule" =~ --dport[[:space:]]+([0-9]+) ]]; then
+                port="${BASH_REMATCH[1]}"
+                if ! ufw status numbered | grep -qE "ALLOW[[:space:]]+.*$port/$proto"; then
+                    ufw allow "$port/$proto" comment "$SCRIPT_TAG" >/dev/null 2>&1
+                    echo "✅ 已补充 UFW 规则: $port/$proto"
+                fi
+            fi
+        done
+    done
+
+    echo "🔄 同步完成"
+}
+
 # 菜单
 show_menu() {
     echo "=============================="
@@ -270,6 +304,7 @@ show_menu() {
     echo "3. 删除指定规则"
     echo "4. 清空所有规则"
     echo "5. 查看当前规则"
+    echo "6. 同步 UFW 规则"
     echo "0. 退出"
     echo "=============================="
 }
@@ -284,6 +319,7 @@ while true; do
         3) delete_specific_rule ;;
         4) clear_all_rules ;;
         5) list_rules ;;
+        6) sync_ufw_rules ;;
         0) echo "👋 退出"; exit 0 ;;
         *) echo "❌ 无效选项" ;;
     esac
