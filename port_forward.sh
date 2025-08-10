@@ -1,6 +1,34 @@
 #!/bin/bash
 SCRIPT_TAG="PortForwardScript"
 
+# 检查 UFW 是否启用
+is_ufw_enabled() {
+    if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then
+        return 0
+    fi
+    return 1
+}
+
+# 添加 UFW 规则
+add_ufw_rule() {
+    local port="$1"
+    local proto="$2"
+    if is_ufw_enabled; then
+        ufw allow "$port/$proto" >/dev/null 2>&1
+        echo "🔓 已添加 UFW 放行: $port/$proto"
+    fi
+}
+
+# 删除 UFW 规则
+delete_ufw_rule() {
+    local port="$1"
+    local proto="$2"
+    if is_ufw_enabled; then
+        ufw delete allow "$port/$proto" >/dev/null 2>&1
+        echo "🔒 已删除 UFW 放行: $port/$proto"
+    fi
+}
+
 # 协议选择函数
 select_protocol() {
     echo "请选择协议："
@@ -35,7 +63,7 @@ add_single_port_forward() {
     read -p "请输入本机监听端口: " LOCAL_PORT
     read -p "请输入目标服务器 IP: " TARGET_IP
     read -p "请输入目标服务器端口: " TARGET_PORT
-    
+
     select_protocol  # 每个转发单独选协议
 
     for PROTO in "${PROTOS[@]}"; do
@@ -44,6 +72,7 @@ add_single_port_forward() {
             -m comment --comment "$SCRIPT_TAG"
         iptables -t nat -A POSTROUTING -p $PROTO -d $TARGET_IP --dport $TARGET_PORT \
             -j MASQUERADE -m comment --comment "$SCRIPT_TAG"
+        add_ufw_rule "$LOCAL_PORT" "$PROTO"
     done
 
     echo "✅ 已添加单个端口转发: 本机 $LOCAL_PORT → $TARGET_IP:$TARGET_PORT (${PROTOS[*]})"
@@ -55,7 +84,7 @@ add_port_range_forward() {
     read -p "请输入本机结束端口: " LOCAL_END
     read -p "请输入目标服务器 IP: " TARGET_IP
     read -p "请输入目标起始端口: " TARGET_START
-    
+
     select_protocol  # 每个转发单独选协议
 
     for PROTO in "${PROTOS[@]}"; do
@@ -65,6 +94,13 @@ add_port_range_forward() {
         iptables -t nat -A POSTROUTING -p $PROTO -d $TARGET_IP \
             --dport $TARGET_START:$((TARGET_START + LOCAL_END - LOCAL_START)) \
             -j MASQUERADE -m comment --comment "$SCRIPT_TAG"
+
+        # 批量放行 UFW
+        if is_ufw_enabled; then
+            for port in $(seq "$LOCAL_START" "$LOCAL_END"); do
+                add_ufw_rule "$port" "$PROTO"
+            done
+        fi
     done
 
     echo "✅ 已添加端口段转发: 本机 $LOCAL_START-$LOCAL_END → $TARGET_IP:$TARGET_START-... (${PROTOS[*]})"
@@ -95,6 +131,14 @@ delete_specific_rule() {
         echo "🗑 删除规则: $rule"
         iptables -t $table ${rule_str//-A/-D}
         iptables -t $table ${rule_str//-I/-D}
+
+        # 尝试从规则里解析端口+协议删除 UFW 规则
+        if [[ "$rule_str" =~ -p[[:space:]]+([a-z]+).*--dport[[:space:]]+([0-9]+) ]]; then
+            proto="${BASH_REMATCH[1]}"
+            port="${BASH_REMATCH[2]}"
+            delete_ufw_rule "$port" "$proto"
+        fi
+
         echo "✅ 删除完成"
     else
         echo "❌ 输入无效"
@@ -107,7 +151,15 @@ clear_all_rules() {
     for table in nat filter; do
         rules=$(iptables -t $table -S | grep "$SCRIPT_TAG")
         while read -r rule; do
-            [ -n "$rule" ] && iptables -t $table ${rule//-A/-D}
+            if [ -n "$rule" ]; then
+                iptables -t $table ${rule//-A/-D}
+                # 尝试解析端口和协议，删除 UFW
+                if [[ "$rule" =~ -p[[:space:]]+([a-z]+).*--dport[[:space:]]+([0-9]+) ]]; then
+                    proto="${BASH_REMATCH[1]}"
+                    port="${BASH_REMATCH[2]}"
+                    delete_ufw_rule "$port" "$proto"
+                fi
+            fi
         done <<< "$rules"
     done
     echo "✅ 已清空"
