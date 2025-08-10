@@ -1,22 +1,7 @@
 #!/bin/bash
 SCRIPT_TAG="PortForwardScript"
-
-# 检测并安装持久化依赖
-check_and_install_persistent() {
-    local need_install=0
-    if ! command -v netfilter-persistent >/dev/null 2>&1; then
-        need_install=1
-    fi
-    if ! dpkg -s iptables-persistent >/dev/null 2>&1; then
-        need_install=1
-    fi
-
-    if [ $need_install -eq 1 ]; then
-        echo "检测到未安装 netfilter-persistent 或 iptables-persistent，正在自动安装..."
-        sudo apt update && sudo apt install -y netfilter-persistent iptables-persistent
-        echo "安装完成。"
-    fi
-}
+RULES_FILE="/etc/port_forward_rules.sh"
+SERVICE_FILE="/etc/systemd/system/portforward.service"
 
 # 检查 IPv6 支持
 has_ipv6() {
@@ -62,6 +47,73 @@ del_ufw_rule() {
     ufw delete allow $port/$proto >/dev/null 2>&1
 }
 
+# 清除所有本脚本相关iptables/ip6tables规则（但不保存）
+clear_all_iptables_rules() {
+    for cmd in iptables ip6tables; do
+        for table in nat filter; do
+            rules=$($cmd -t $table -S | grep "$SCRIPT_TAG")
+            while read -r rule; do
+                [ -n "$rule" ] && $cmd -t $table ${rule//-A/-D}
+            done <<< "$rules"
+        done
+    done
+}
+
+# 创建并启用 systemd 服务
+enable_systemd_service() {
+    if [ ! -f "$SERVICE_FILE" ]; then
+        cat << EOF > "$SERVICE_FILE"
+[Unit]
+Description=恢复端口转发规则
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash $RULES_FILE
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+        systemctl daemon-reload
+        systemctl enable portforward.service
+        systemctl start portforward.service
+        echo "✅ systemd 服务 portforward.service 创建并启动"
+    else
+        systemctl daemon-reload
+        systemctl enable portforward.service >/dev/null 2>&1
+        systemctl start portforward.service >/dev/null 2>&1
+    fi
+}
+
+# 停用并删除 systemd 服务
+disable_systemd_service() {
+    if [ -f "$SERVICE_FILE" ]; then
+        systemctl stop portforward.service >/dev/null 2>&1
+        systemctl disable portforward.service >/dev/null 2>&1
+        rm -f "$SERVICE_FILE"
+        systemctl daemon-reload
+        echo "✅ systemd 服务 portforward.service 已删除"
+    fi
+}
+
+# 保存当前iptables/ip6tables规则到规则文件，并启用systemd服务
+save_rules_to_file() {
+    echo "#!/bin/bash" > "$RULES_FILE"
+    echo "# 自动生成的端口转发规则文件，含iptables/ip6tables命令" >> "$RULES_FILE"
+    echo >> "$RULES_FILE"
+    for cmd in iptables ip6tables; do
+        for table in nat filter; do
+            $cmd -t $table -S | grep "$SCRIPT_TAG" | while read -r line; do
+                # 用 -I 保证插入顺序
+                echo "${cmd} -t ${table} -I ${line#-A }"
+            done
+        done
+    done
+    chmod +x "$RULES_FILE"
+    enable_systemd_service
+}
+
 # 添加单端口转发
 add_single_port_forward() {
     get_listen_ip
@@ -70,6 +122,9 @@ add_single_port_forward() {
     read -p "请输入目标服务器端口: " TARGET_PORT
 
     select_protocol
+
+    # 清理旧规则避免重复
+    clear_all_iptables_rules
 
     for PROTO in "${PROTOS[@]}"; do
         # IPv4
@@ -92,7 +147,7 @@ add_single_port_forward() {
         add_ufw_rule "$LOCAL_PORT" "$PROTO"
     done
 
-    save_rules
+    save_rules_to_file
     echo "✅ 已添加单个端口转发: $LISTEN_IP:$LOCAL_PORT → $TARGET_IP:$TARGET_PORT (${PROTOS[*]})"
 }
 
@@ -105,6 +160,8 @@ add_port_range_forward() {
     read -p "请输入目标起始端口: " TARGET_START
 
     select_protocol
+
+    clear_all_iptables_rules
 
     for PROTO in "${PROTOS[@]}"; do
         # IPv4
@@ -131,7 +188,7 @@ add_port_range_forward() {
         done
     done
 
-    save_rules
+    save_rules_to_file
     echo "✅ 已添加端口段转发: $LISTEN_IP:$LOCAL_START-$LOCAL_END → $TARGET_IP:$TARGET_START-... (${PROTOS[*]})"
 }
 
@@ -172,7 +229,7 @@ delete_specific_rule() {
             del_ufw_rule "$port" "$proto"
         fi
 
-        save_rules
+        save_rules_to_file
         echo "✅ 已删除规则"
     else
         echo "❌ 输入无效"
@@ -182,31 +239,16 @@ delete_specific_rule() {
 # 清空所有规则
 clear_all_rules() {
     echo "🗑 清空所有本脚本添加的规则..."
-    for cmd in iptables ip6tables; do
-        for table in nat filter; do
-            rules=$($cmd -t $table -S | grep "$SCRIPT_TAG")
-            while read -r rule; do
-                [ -n "$rule" ] && $cmd -t $table ${rule//-A/-D}
-            done <<< "$rules"
-        done
-    done
+    clear_all_iptables_rules
 
     # 删除 UFW 相关规则
     ufw status numbered | grep "$SCRIPT_TAG" >/dev/null 2>&1 && \
     yes | ufw delete allow comment "$SCRIPT_TAG"
 
-    save_rules
-    echo "✅ 已清空"
-}
+    save_rules_to_file
 
-# 保存规则
-save_rules() {
-    if command -v netfilter-persistent >/dev/null 2>&1; then
-        sudo netfilter-persistent save
-    elif command -v service >/dev/null 2>&1; then
-        sudo service iptables save >/dev/null 2>&1
-        sudo service ip6tables save >/dev/null 2>&1
-    fi
+    disable_systemd_service
+    echo "✅ 已清空并删除 systemd 服务"
 }
 
 # 查看规则
@@ -231,9 +273,6 @@ show_menu() {
     echo "0. 退出"
     echo "=============================="
 }
-
-# 入口：先检测依赖
-check_and_install_persistent
 
 # 主循环
 while true; do
