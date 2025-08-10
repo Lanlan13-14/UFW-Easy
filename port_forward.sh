@@ -127,20 +127,29 @@ add_single_port_forward() {
     clear_all_iptables_rules
 
     for PROTO in "${PROTOS[@]}"; do
-        # IPv4
+        # IPv4 NAT 规则
         iptables -t nat -A PREROUTING -p $PROTO --dport $LOCAL_PORT \
             -j DNAT --to-destination $TARGET_IP:$TARGET_PORT \
             -m comment --comment "$SCRIPT_TAG"
         iptables -t nat -A POSTROUTING -p $PROTO -d $TARGET_IP --dport $TARGET_PORT \
             -j MASQUERADE -m comment --comment "$SCRIPT_TAG"
+        
+        # IPv4 转发规则 (关键修复)
+        iptables -A FORWARD -p $PROTO -d $TARGET_IP --dport $TARGET_PORT \
+            -j ACCEPT -m comment --comment "$SCRIPT_TAG"
 
         # IPv6
         if has_ipv6; then
+            # IPv6 NAT 规则
             ip6tables -t nat -A PREROUTING -p $PROTO --dport $LOCAL_PORT \
                 -j DNAT --to-destination [$TARGET_IP]:$TARGET_PORT \
                 -m comment --comment "$SCRIPT_TAG"
             ip6tables -t nat -A POSTROUTING -p $PROTO -d $TARGET_IP --dport $TARGET_PORT \
                 -j MASQUERADE -m comment --comment "$SCRIPT_TAG"
+            
+            # IPv6 转发规则 (关键修复)
+            ip6tables -A FORWARD -p $PROTO -d $TARGET_IP --dport $TARGET_PORT \
+                -j ACCEPT -m comment --comment "$SCRIPT_TAG"
         fi
 
         # UFW
@@ -161,6 +170,9 @@ add_port_range_forward() {
 
     select_protocol
 
+    # 计算目标端口范围
+    TARGET_END=$((TARGET_START + LOCAL_END - LOCAL_START))
+
     clear_all_iptables_rules
 
     for PROTO in "${PROTOS[@]}"; do
@@ -169,8 +181,12 @@ add_port_range_forward() {
             -j DNAT --to-destination $TARGET_IP:$TARGET_START \
             -m comment --comment "$SCRIPT_TAG"
         iptables -t nat -A POSTROUTING -p $PROTO -d $TARGET_IP \
-            --dport $TARGET_START:$((TARGET_START + LOCAL_END - LOCAL_START)) \
+            --dport $TARGET_START:$TARGET_END \
             -j MASQUERADE -m comment --comment "$SCRIPT_TAG"
+        
+        # IPv4 转发规则 (关键修复)
+        iptables -A FORWARD -p $PROTO -d $TARGET_IP --dport $TARGET_START:$TARGET_END \
+            -j ACCEPT -m comment --comment "$SCRIPT_TAG"
 
         # IPv6
         if has_ipv6; then
@@ -178,8 +194,12 @@ add_port_range_forward() {
                 -j DNAT --to-destination [$TARGET_IP]:$TARGET_START \
                 -m comment --comment "$SCRIPT_TAG"
             ip6tables -t nat -A POSTROUTING -p $PROTO -d $TARGET_IP \
-                --dport $TARGET_START:$((TARGET_START + LOCAL_END - LOCAL_START)) \
+                --dport $TARGET_START:$TARGET_END \
                 -j MASQUERADE -m comment --comment "$SCRIPT_TAG"
+            
+            # IPv6 转发规则 (关键修复)
+            ip6tables -A FORWARD -p $PROTO -d $TARGET_IP --dport $TARGET_START:$TARGET_END \
+                -j ACCEPT -m comment --comment "$SCRIPT_TAG"
         fi
 
         # UFW
@@ -189,7 +209,7 @@ add_port_range_forward() {
     done
 
     save_rules_to_file
-    echo "✅ 已添加端口段转发: $LISTEN_IP:$LOCAL_START-$LOCAL_END → $TARGET_IP:$TARGET_START-... (${PROTOS[*]})"
+    echo "✅ 已添加端口段转发: $LISTEN_IP:$LOCAL_START-$LOCAL_END → $TARGET_IP:$TARGET_START-$TARGET_END (${PROTOS[*]})"
 }
 
 # 删除指定规则
@@ -198,6 +218,8 @@ delete_specific_rule() {
     mapfile -t all_rules < <(
         iptables -t nat -S | grep "$SCRIPT_TAG" | sed 's/^/ipv4 nat /'
         ip6tables -t nat -S | grep "$SCRIPT_TAG" | sed 's/^/ipv6 nat /'
+        iptables -t filter -S | grep "$SCRIPT_TAG" | sed 's/^/ipv4 filter /'
+        ip6tables -t filter -S | grep "$SCRIPT_TAG" | sed 's/^/ipv6 filter /'
     )
 
     if [ ${#all_rules[@]} -eq 0 ]; then
@@ -213,8 +235,9 @@ delete_specific_rule() {
     if [[ $num =~ ^[0-9]+$ ]] && [ $num -gt 0 ] && [ $num -le ${#all_rules[@]} ]; then
         rule="${all_rules[$((num-1))]}"
         ip_ver=${rule%% *}
-        table="nat"
-        rule_str=${rule#* * }
+        table=${rule#* * }
+        table=${table%% *}
+        rule_str=${rule#* * * }
 
         if [ "$ip_ver" = "ipv4" ]; then
             iptables -t $table ${rule_str//-A/-D}
@@ -223,10 +246,12 @@ delete_specific_rule() {
         fi
 
         # 删除对应 UFW
-        port=$(echo "$rule_str" | grep -oP '(?<=--dport )\d+')
-        proto=$(echo "$rule_str" | grep -oP '(?<=-p )\w+')
-        if [ -n "$port" ] && [ -n "$proto" ]; then
-            del_ufw_rule "$port" "$proto"
+        if [[ "$rule_str" =~ --dport[[:space:]]+([0-9]+) ]]; then
+            port="${BASH_REMATCH[1]}"
+            proto=$(echo "$rule_str" | grep -oP '(?<=-p )\w+')
+            if [ -n "$port" ] && [ -n "$proto" ]; then
+                del_ufw_rule "$port" "$proto"
+            fi
         fi
 
         save_rules_to_file
@@ -258,9 +283,15 @@ list_rules() {
     echo
     echo "📜 IPv6 NAT 表:"
     ip6tables -t nat -S | grep "$SCRIPT_TAG" || echo "（无）"
+    echo
+    echo "📜 IPv4 FILTER 表:"
+    iptables -t filter -S | grep "$SCRIPT_TAG" || echo "（无）"
+    echo
+    echo "📜 IPv6 FILTER 表:"
+    ip6tables -t filter -S | grep "$SCRIPT_TAG" || echo "（无）"
 }
 
-# 新增：同步 UFW 规则
+# 同步 UFW 规则
 sync_ufw_rules() {
     echo "🔄 正在同步 UFW 规则..."
     if ! command -v ufw >/dev/null 2>&1; then
@@ -275,15 +306,14 @@ sync_ufw_rules() {
                 start_port="${BASH_REMATCH[1]}"
                 end_port="${BASH_REMATCH[2]}"
                 for ((p=start_port; p<=end_port; p++)); do
-                    # 判断 UFW 是否已有规则
-                    if ! ufw status numbered | grep -qE "ALLOW[[:space:]]+.*$p/$proto"; then
+                    if ! ufw status | grep -qE "$p/$proto.*$SCRIPT_TAG"; then
                         ufw allow "$p/$proto" comment "$SCRIPT_TAG" >/dev/null 2>&1
                         echo "✅ 已补充 UFW 规则: $p/$proto"
                     fi
                 done
             elif [[ "$rule" =~ --dport[[:space:]]+([0-9]+) ]]; then
                 port="${BASH_REMATCH[1]}"
-                if ! ufw status numbered | grep -qE "ALLOW[[:space:]]+.*$port/$proto"; then
+                if ! ufw status | grep -qE "$port/$proto.*$SCRIPT_TAG"; then
                     ufw allow "$port/$proto" comment "$SCRIPT_TAG" >/dev/null 2>&1
                     echo "✅ 已补充 UFW 规则: $port/$proto"
                 fi
@@ -292,6 +322,25 @@ sync_ufw_rules() {
     done
 
     echo "🔄 同步完成"
+}
+
+# 确保IP转发已启用
+ensure_ip_forwarding() {
+    # 检查IPv4转发
+    if [ "$(sysctl -n net.ipv4.ip_forward)" != "1" ]; then
+        echo "⚠️ 启用IPv4转发..."
+        sysctl -w net.ipv4.ip_forward=1
+        sed -i '/net.ipv4.ip_forward/d' /etc/sysctl.conf
+        echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
+    fi
+
+    # 检查IPv6转发
+    if has_ipv6 && [ "$(sysctl -n net.ipv6.conf.all.forwarding)" != "1" ]; then
+        echo "⚠️ 启用IPv6转发..."
+        sysctl -w net.ipv6.conf.all.forwarding=1
+        sed -i '/net.ipv6.conf.all.forwarding/d' /etc/sysctl.conf
+        echo "net.ipv6.conf.all.forwarding=1" >> /etc/sysctl.conf
+    fi
 }
 
 # 菜单
@@ -310,6 +359,7 @@ show_menu() {
 }
 
 # 主循环
+ensure_ip_forwarding
 while true; do
     show_menu
     read -p "请选择操作: " choice
