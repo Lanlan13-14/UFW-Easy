@@ -131,12 +131,20 @@ show_protocol_menu() {
                 return 1
                 ;;
             3) 
+                # 修复点：正确处理 TCP+UDP 协议
+                # 对于单端口，使用 "port" 语法
+                # 对于端口范围，使用 "port:port" 语法
+                local port_syntax="port"
+                if [[ "$port" == *:* ]]; then
+                    port_syntax="ports"
+                fi
+                
                 if [ -z "$ip" ]; then
                     add_rule "$rule_type $port"
                 else
-                    add_rule "$rule_type from $ip to any port $port"
+                    add_rule "$rule_type from $ip to any $port_syntax $port"
                 fi
-                read -n 1 -s -r -p "✅ 规则已添加，按任意键继续..."
+                read -n 1 -s -r -p "✅ 规则已添加（TCP+UDP），按任意键继续..."
                 return 1
                 ;;
             0) 
@@ -257,8 +265,10 @@ add_advanced_rule() {
                 read end_port
 
                 if [ -n "$ip" ] && [ -n "$start_port" ] && [ -n "$end_port" ]; then
+                    # 组合端口范围
+                    port_range="${start_port}:${end_port}"
                     # 复用协议选择菜单
-                    show_protocol_menu "$start_port:$end_port" "allow" "$ip"
+                    show_protocol_menu "$port_range" "allow" "$ip"
                 else
                     echo "❌ 所有字段都必须填写"
                     sleep 1
@@ -311,8 +321,9 @@ add_advanced_rule() {
                                 break
                                 ;;
                             3) 
+                                # 修复点：正确处理 TCP+UDP 协议
                                 add_rule "allow in on $interface to any port $port"
-                                echo "✅ 规则已添加: 允许 $interface 接口上的 $port 访问"
+                                echo "✅ 规则已添加: 允许 $interface 接口上的 $port (TCP+UDP) 访问"
                                 read -n 1 -s -r -p "按任意键继续..."
                                 break
                                 ;;
