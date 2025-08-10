@@ -2,7 +2,7 @@
 
 # ===========================================================
 # 增强版 UFW 防火墙管理工具
-# 版本: 5.0
+# 版本: 5.1
 # 项目地址: https://github.com/Lanlan13-14/UFW-Easy
 # 特点: 
 #   - 自动安装 UFW 但不自动启用
@@ -44,7 +44,7 @@ show_menu() {
     echo "====================================================="
     echo "          增强版 UFW 防火墙管理工具"
     echo "  项目地址: ${GITHUB_REPO}"
-    echo "          版本: 5.0"
+    echo "          版本: 5.1"
     echo "====================================================="
     ufw_status=$(ufw status | grep -i status)
     echo " 当前状态: ${ufw_status}"
@@ -82,10 +82,10 @@ show_status() {
 # 添加规则（确保规则优先于默认拒绝策略）
 add_rule() {
     local rule="$1"
-    # 使用 insert 1 确保规则在默认策略之前
-    if ! ufw insert 1 $rule; then
+    # 修复点：为 $rule 添加双引号
+    if ! ufw insert 1 "$rule"; then
         # 如果插入失败（可能因为第一条规则已存在），则追加规则
-        ufw $rule
+        ufw "$rule"
     fi
     echo "✅ 规则已添加: $rule"
     echo "⚠️ 注意: 规则将在重载防火墙后生效"
@@ -399,9 +399,13 @@ delete_rule() {
         if [ -z "$cleaned_num" ]; then
             echo "❌ 无效的规则编号: $rule_num"
         elif ufw status numbered | grep -q "^\[ *$cleaned_num\]"; then
-            ufw --force delete "$cleaned_num"
-            echo "✅ 规则 $cleaned_num 已删除 (输入: $rule_num)"
-            echo "⚠️ 注意: 变更将在重载防火墙后生效"
+            # 修复点：正确删除规则（去掉 --force 参数）
+            if ufw delete "$cleaned_num"; then
+                echo "✅ 规则 $cleaned_num 已删除 (输入: $rule_num)"
+                echo "⚠️ 注意: 变更将在重载防火墙后生效"
+            else
+                echo "❌ 删除规则失败，请检查规则编号是否正确"
+            fi
         else
             echo "❌ 规则 $cleaned_num 不存在 (输入: $rule_num)"
         fi
@@ -430,28 +434,29 @@ view_app_profiles() {
 }
 
 # 端口转发设置 - 使用新脚本
-port_forwarding() {
+# 修复点：重命名函数避免冲突
+setup_port_forwarding() {
     clear
     echo "正在下载并执行端口转发脚本..."
-    
+
     # 临时脚本路径
     TEMP_SCRIPT="/tmp/port_forward.sh"
-    
+
     # 下载脚本
     curl -L -o "$TEMP_SCRIPT" https://raw.githubusercontent.com/Lanlan13-14/UFW-Easy/refs/heads/main/port_forward.sh
-    
+
     if [ $? -ne 0 ]; then
         echo "❌ 下载端口转发脚本失败，请检查网络连接"
         read -n 1 -s -r -p "按任意键返回主菜单..."
         return
     fi
-    
+
     # 设置执行权限
     chmod +x "$TEMP_SCRIPT"
-    
+
     # 执行脚本
     "$TEMP_SCRIPT"
-    
+
     echo "端口转发脚本执行完成"
     read -n 1 -s -r -p "按任意键返回主菜单..."
 }
@@ -609,7 +614,7 @@ main() {
             3) add_advanced_rule ;;
             4) delete_rule ;;
             5) view_app_profiles ;;
-            6) port_forwarding ;;
+            6) setup_port_forwarding ;;  # 使用修复后的函数名
             7) enable_firewall ;;
             8) disable_firewall ;;
             9) reset_firewall ;;
