@@ -1,10 +1,11 @@
 #!/bin/bash
 
 # UFW 防火墙管理工具卸载脚本
-# 版本: 3.0
-# 特点: 
+# 版本: 3.1
+# 特点:
 #   - 卸载后询问是否重启系统
 #   - 新增完全删除UFW及所有规则选项
+#   - 卸载时自动停用并删除 portforward systemd 服务
 
 # 检查 root 权限
 if [ "$(id -u)" -ne 0 ]; then
@@ -12,7 +13,18 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 1
 fi
 
-# 显示卸载选项
+# 停用并删除 portforward systemd 服务（如果存在）
+remove_portforward_service() {
+    if [ -f /etc/systemd/system/portforward.service ]; then
+        echo "🛠 停用并删除 portforward systemd 服务..."
+        systemctl stop portforward.service >/dev/null 2>&1
+        systemctl disable portforward.service >/dev/null 2>&1
+        rm -f /etc/systemd/system/portforward.service
+        systemctl daemon-reload
+        echo "✅ portforward systemd 服务已删除"
+    fi
+}
+
 echo "============================================="
 echo "      UFW 防火墙管理工具卸载程序"
 echo "============================================="
@@ -27,65 +39,52 @@ read option
 case $option in
     1)
         echo "🔧 正在仅卸载管理工具..."
-        # 删除主程序
         rm -f /usr/local/bin/ufw-easy
-
-        # 删除配置文件
         rm -f /etc/ufw-easy.conf 2>/dev/null
-
         echo "✅ 管理工具已卸载"
         echo "ℹ️ 防火墙规则和UFW程序仍然保留"
         ;;
     2)
         echo "⚠️ 正在完全卸载工具并重置防火墙..."
-        # 删除主程序
         rm -f /usr/local/bin/ufw-easy
-
-        # 删除配置文件
         rm -f /etc/ufw-easy.conf 2>/dev/null
 
-        # 重置防火墙
         ufw --force reset
         ufw disable
 
-        # 删除端口转发规则
         iptables -t nat -F
         iptables -t mangle -F
         iptables -F
         iptables -X
-        
-        # 保存空规则
+
         if [ -d "/etc/iptables" ]; then
             iptables-save > /etc/iptables/rules.v4
         fi
+
+        remove_portforward_service
 
         echo "✅ 工具已完全卸载，防火墙已重置"
         echo "ℹ️ UFW软件包仍然保留在系统中"
         ;;
     3)
         echo "⚠️ 正在完全删除UFW及所有规则..."
-        # 删除主程序
         rm -f /usr/local/bin/ufw-easy
-
-        # 删除配置文件
         rm -f /etc/ufw-easy.conf 2>/dev/null
 
-        # 重置防火墙
         ufw --force reset
         ufw disable
 
-        # 删除端口转发规则
         iptables -t nat -F
         iptables -t mangle -F
         iptables -F
         iptables -X
-        
-        # 保存空规则
+
         if [ -d "/etc/iptables" ]; then
             iptables-save > /etc/iptables/rules.v4
         fi
-        
-        # 卸载UFW软件包
+
+        remove_portforward_service
+
         if command -v ufw &> /dev/null; then
             apt-get remove --purge -y ufw
             apt-get autoremove -y
@@ -93,7 +92,7 @@ case $option in
         else
             echo "ℹ️ UFW软件包未安装，无需卸载"
         fi
-        
+
         echo "✅ UFW及所有相关规则已完全删除"
         ;;
     4)
@@ -109,11 +108,10 @@ esac
 echo "============================================="
 echo "卸载完成！建议重启系统使所有更改生效"
 
-# 询问是否重启系统
 echo -n "是否立即重启系统? [y/N]: "
 read reboot_choice
 
-if [ "$reboot_choice" = "y" ] || [ "$reboot_choice" = "Y" ]; then
+if [[ "$reboot_choice" =~ ^[Yy]$ ]]; then
     echo "🔄 正在重启系统..."
     reboot
 else
