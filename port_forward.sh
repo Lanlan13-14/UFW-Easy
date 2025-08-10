@@ -47,14 +47,20 @@ del_ufw_rule() {
     ufw delete allow $port/$proto >/dev/null 2>&1
 }
 
-# 清除所有本脚本相关iptables/ip6tables规则（但不保存）
+# 修复：清除所有本脚本相关iptables/ip6tables规则
 clear_all_iptables_rules() {
+    # 使用更可靠的方法删除规则
     for cmd in iptables ip6tables; do
         for table in nat filter; do
-            rules=$($cmd -t $table -S | grep "$SCRIPT_TAG")
-            while read -r rule; do
-                [ -n "$rule" ] && $cmd -t $table ${rule//-A/-D}
-            done <<< "$rules"
+            # 获取所有规则链
+            chains=$($cmd -t $table -L | grep '^Chain' | awk '{print $2}')
+            for chain in $chains; do
+                # 按行号倒序删除规则（避免索引变化）
+                $cmd -t $table -L $chain --line-numbers | grep "$SCRIPT_TAG" | sort -rn | while read line; do
+                    rule_num=$(echo $line | awk '{print $1}')
+                    $cmd -t $table -D $chain $rule_num
+                done
+            done
         done
     done
 }
@@ -240,9 +246,12 @@ delete_specific_rule() {
         rule_str=${rule#* * * }
 
         if [ "$ip_ver" = "ipv4" ]; then
-            iptables -t $table ${rule_str//-A/-D}
+            # 修复：使用 -D 而不是替换 -A
+            rule_str="${rule_str/-A/-D}"
+            iptables -t $table $rule_str
         else
-            ip6tables -t $table ${rule_str//-A/-D}
+            rule_str="${rule_str/-A/-D}"
+            ip6tables -t $table $rule_str
         fi
 
         # 删除对应 UFW
@@ -261,14 +270,18 @@ delete_specific_rule() {
     fi
 }
 
-# 清空所有规则
+# 修复：清空所有规则
 clear_all_rules() {
     echo "🗑 清空所有本脚本添加的规则..."
     clear_all_iptables_rules
 
     # 删除 UFW 相关规则
-    ufw status numbered | grep "$SCRIPT_TAG" >/dev/null 2>&1 && \
-    yes | ufw delete allow comment "$SCRIPT_TAG"
+    if command -v ufw >/dev/null 2>&1; then
+        # 更可靠的UFW规则删除方法
+        ufw status numbered | grep "$SCRIPT_TAG" | awk -F'[][]' '{print $2}' | tr -d ' ' | sort -rn | while read rule_num; do
+            yes | ufw delete $rule_num >/dev/null 2>&1
+        done
+    fi
 
     save_rules_to_file
 
