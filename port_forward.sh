@@ -17,7 +17,7 @@ check_root() {
 
 # 安装必要依赖
 install_dependencies() {
-    local pkgs="curl iptables ip6tables ufw"
+    local pkgs="curl iptables git ufw"
     echo -e "${YELLOW}正在检查系统依赖...${NC}"
     if command -v apt >/dev/null; then
         apt update
