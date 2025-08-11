@@ -17,13 +17,13 @@ check_root() {
 
 # 安装必要依赖
 install_dependencies() {
-    local pkgs="curl iptables git ufw"
+    local pkgs="curl iptables git ufw make gcc"
     echo -e "${YELLOW}正在检查系统依赖...${NC}"
-    if command -v apt >/dev/null; then
-        apt update
-        apt install -y $pkgs kmod git make gcc linux-headers-$(uname -r)
-    elif command -v yum >/dev/null; then
-        yum install -y $pkgs kernel-devel git make gcc
+    if command -v apt >/dev/null 2>&1; then
+        sudo apt update
+        sudo apt install -y $pkgs kmod "linux-headers-$(uname -r)"
+    elif command -v yum >/dev/null 2>&1; then
+        sudo yum install -y $pkgs kernel-devel
     else
         echo -e "${RED}不支持的包管理器，请手动安装依赖${NC}"
         return 1
