@@ -1,6 +1,6 @@
 #!/bin/bash
 SCRIPT_TAG="PortForwardScript"
-RULES_FILE="/etc/port_forward_rules.sh"
+RULESFILE="/etc/portforward_rules.sh"
 SERVICE_FILE="/etc/systemd/system/portforward.service"
 NAT64_PREFIX="64:ff9b::"
 
@@ -17,13 +17,24 @@ check_root() {
 
 # 安装必要依赖
 install_dependencies() {
-    local pkgs="curl iptables git ufw make gcc"
+    local pkgs="curl iptables git ufw"
     echo -e "${YELLOW}正在检查系统依赖...${NC}"
     if command -v apt >/dev/null 2>&1; then
         sudo apt update
-        sudo apt install -y $pkgs kmod "linux-headers-$(uname -r)"
+        sudo apt install -y $pkgs
+        # 添加Jool仓库
+        if ! grep -q "jool" /etc/apt/sources.list.d/*; then
+            echo "deb [arch=amd64] https://download.opensuse.org/repositories/home:/nicmx/xUbuntu_$(lsb_release -rs)/ /" | sudo tee /etc/apt/sources.list.d/home:nicmx.list
+            curl -fsSL "https://download.opensuse.org/repositories/home:nicmx/xUbuntu_$(lsb_release -rs)/Release.key" | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/home_nicmx.gpg >/dev/null
+            sudo apt update
+        fi
+        sudo apt install -y jool-tools
     elif command -v yum >/dev/null 2>&1; then
-        sudo yum install -y $pkgs kernel-devel
+        sudo yum install -y $pkgs
+        # 对于CentOS/RHEL，需要手动安装Jool
+        if ! yum list installed jool >/dev/null 2>&1; then
+            echo -e "${YELLOW}请手动安装Jool，参考: https://www.jool.mx/install.html${NC}"
+        fi
     else
         echo -e "${RED}不支持的包管理器，请手动安装依赖${NC}"
         return 1
@@ -32,23 +43,31 @@ install_dependencies() {
 
 # NAT64模块管理
 manage_nat64() {
-    # 安装nat46模块
-    if ! lsmod | grep -q "nat46" && has_usable_ipv6; then
+    # 检查并安装Jool
+    if ! command -v jool >/dev/null 2>&1 && hasusableipv6; then
         echo -e "${YELLOW}正在配置NAT64/NAT46支持...${NC}"
+        install_dependencies
         
-        [ ! -d "/tmp/nat46" ] && git clone https://github.com/ayourtch/nat46.git /tmp/nat46
-        cd /tmp/nat46 && make && make install
-        modprobe nat46
-        echo "nat46" > /etc/modules-load.d/nat46.conf
+        # 加载Jool模块
+        modprobe jool
+        echo "jool" > /etc/modules-load.d/jool.conf
         
-        # 配置NAT64网络
-        ip -6 route add local ${NAT64_PREFIX}/96 dev lo 2>/dev/null
-        ip6tables -t nat -A POSTROUTING -s ${NAT64_PREFIX}/96 -j MASQUERADE -m comment --comment "NAT64"
+        # 配置NAT64池
+        jool instance add "default" --netfilter --pool6 ${NAT64_PREFIX}/96
+        jool global update pmtudisc on
+        
+        # 持久化配置
+        cat > /etc/jool.conf <<EOF
+instance add "default" --netfilter --pool6 ${NAT64_PREFIX}/96
+global update pmtudisc on
+EOF
+        echo "jool instance add \"default\" --netfilter --pool6 ${NAT64_PREFIX}/96" >> "$RULESFILE"
+        echo "jool global update pmtudisc on" >> "$RULESFILE"
     fi
 }
 
 # 网络检测函数
-has_usable_ipv6() {
+hasusableipv6() {
     curl -s -6 --connect-timeout 3 https://ipv6.google.com >/dev/null || \
     ip -6 addr show scope global | grep -q 'inet6' || \
     [ -s /proc/net/if_inet6 ]
@@ -57,7 +76,7 @@ has_usable_ipv6() {
 # 地址处理函数
 is_ipv4() { [[ $1 =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; }
 is_ipv6() { [[ $1 =~ : ]]; }
-ipv4_to_nat64() { echo "${NAT64_PREFIX}$(echo $1 | sed 's/\./:/g')"; }
+ipv4tonat64() { echo "${NAT64_PREFIX}$(echo $1 | sed 's/\./:/g')"; }
 
 # 协议选择
 select_protocol() {
@@ -75,10 +94,10 @@ select_protocol() {
 }
 
 # 获取监听IP
-get_listen_ip() {
+getlistenip() {
     read -p "请输入监听IP (回车自动选择): " LISTEN_IP
     [ -z "$LISTEN_IP" ] && {
-        if has_usable_ipv6; then
+        if hasusableipv6; then
             LISTEN_IP="dual"
             echo -e "${GREEN}自动选择: 双栈监听 (IPv4+IPv6)${NC}"
         else
@@ -91,7 +110,7 @@ get_listen_ip() {
 }
 
 # UFW规则管理
-manage_ufw_rule() {
+manageufwrule() {
     local action=$1 port=$2 proto=$3
     case $action in
         add)
@@ -106,11 +125,11 @@ manage_ufw_rule() {
 }
 
 # 同步UFW规则
-sync_ufw_rules() {
+syncufwrules() {
     echo -e "${YELLOW}正在同步UFW规则...${NC}"
     declare -A active_ports
     local port proto
-    
+
     # 收集当前规则中的端口
     for cmd in iptables ip6tables; do
         $cmd -t nat -S | grep "$SCRIPT_TAG" | while read -r rule; do
@@ -145,7 +164,7 @@ sync_ufw_rules() {
         ufw status | grep -q "$port_proto.*$SCRIPT_TAG" || {
             port=${port_proto%/*}
             proto=${port_proto#*/}
-            manage_ufw_rule add $port $proto
+            manageufwrule add $port $proto
         }
     done
     echo -e "${GREEN}UFW规则同步完成${NC}"
@@ -162,7 +181,7 @@ manage_rules() {
                     if [[ $line =~ --dport[[:space:]]+([0-9]+) ]]; then
                         port=${BASH_REMATCH[1]}
                         proto=$(grep -oP '(?<=-p )\w+' <<< "$line")
-                        manage_ufw_rule del $port $proto 2>/dev/null
+                        manageufwrule del $port $proto 2>/dev/null
                     fi
                     $cmd -t $table ${line/-A/-D}
                 else
@@ -175,31 +194,39 @@ manage_rules() {
 
 # 保存规则
 save_rules() {
-    echo "#!/bin/bash" > "$RULES_FILE"
-    echo "# 自动生成的端口转发规则" >> "$RULES_FILE"
-    echo "SCRIPT_TAG=\"$SCRIPT_TAG\"" >> "$RULES_FILE"
-    echo "NAT64_PREFIX=\"$NAT64_PREFIX\"" >> "$RULES_FILE"
-    echo >> "$RULES_FILE"
-    
+    echo "#!/bin/bash" > "$RULESFILE"
+    echo "# 自动生成的端口转发规则" >> "$RULESFILE"
+    echo "SCRIPT_TAG=\"$SCRIPT_TAG\"" >> "$RULESFILE"
+    echo "NAT64_PREFIX=\"$NAT64_PREFIX\"" >> "$RULESFILE"
+    echo >> "$RULESFILE"
+
     # 系统配置
-    echo "# 系统配置" >> "$RULES_FILE"
-    echo "sysctl -w net.ipv4.ip_forward=1" >> "$RULES_FILE"
-    echo "sysctl -w net.ipv6.conf.all.forwarding=1" >> "$RULES_FILE"
-    echo "ip -6 route add local ${NAT64_PREFIX}/96 dev lo 2>/dev/null" >> "$RULES_FILE"
-    echo >> "$RULES_FILE"
-    
+    echo "# 系统配置" >> "$RULESFILE"
+    echo "sysctl -w net.ipv4.ip_forward=1" >> "$RULESFILE"
+    echo "sysctl -w net.ipv6.conf.all.forwarding=1" >> "$RULESFILE"
+    echo >> "$RULESFILE"
+
+    # Jool配置
+    if hasusableipv6 && command -v jool >/dev/null 2>&1; then
+        echo "# Jool NAT64配置" >> "$RULESFILE"
+        echo "modprobe jool" >> "$RULESFILE"
+        echo "jool instance add \"default\" --netfilter --pool6 ${NAT64_PREFIX}/96" >> "$RULESFILE"
+        echo "jool global update pmtudisc on" >> "$RULESFILE"
+        echo >> "$RULESFILE"
+    fi
+
     # 规则配置
-    echo "# 转发规则" >> "$RULES_FILE"
-    manage_rules save >> "$RULES_FILE"
-    
-    chmod +x "$RULES_FILE"
+    echo "# 转发规则" >> "$RULESFILE"
+    manage_rules save >> "$RULESFILE"
+
+    chmod +x "$RULESFILE"
     systemctl daemon-reload
     systemctl enable portforward.service >/dev/null 2>&1
 }
 
 # 添加单端口转发
-add_single_port_forward() {
-    get_listen_ip
+addsingleport_forward() {
+    getlistenip
     read -p "请输入本机监听端口: " LOCAL_PORT
     read -p "请输入目标服务器IP: " TARGET_IP
     read -p "请输入目标服务器端口: " TARGET_PORT
@@ -235,41 +262,42 @@ add_single_port_forward() {
         [ -n "$IPV4_LISTEN" ] && {
             if is_ipv6 "$TARGET_IP"; then
                 TARGET_ADDR="[$TARGET_IP]"
-                echo -e "${YELLOW}配置NAT46转发: IPv4->IPv6${NC}"
+                echo -e "${YELLOW}配置IPv4->IPv6转发${NC}"
             else
                 TARGET_ADDR="$TARGET_IP"
             fi
-            
+
             iptables -t nat -A PREROUTING -p $PROTO --dport $LOCAL_PORT \
                 -j DNAT --to-destination $TARGET_ADDR:$TARGET_PORT \
                 -m comment --comment "$SCRIPT_TAG"
-                
+
             iptables -t nat -A POSTROUTING -p $PROTO -d $TARGET_ADDR --dport $TARGET_PORT \
                 -j MASQUERADE -m comment --comment "$SCRIPT_TAG"
-                
+
             iptables -A FORWARD -p $PROTO -d $TARGET_ADDR --dport $TARGET_PORT \
                 -j ACCEPT -m comment --comment "$SCRIPT_TAG"
-                
-            manage_ufw_rule add $LOCAL_PORT $PROTO
+
+            manageufwrule add $LOCAL_PORT $PROTO
         }
 
         # IPv6规则
-        [ -n "$IPV6_LISTEN" ] && has_usable_ipv6 && {
+        [ -n "$IPV6_LISTEN" ] && hasusableipv6 && {
             if is_ipv4 "$TARGET_IP"; then
-                TARGET_ADDR=$(ipv4_to_nat64 "$TARGET_IP")
-                echo -e "${YELLOW}配置NAT64转发: IPv6->IPv4${NC}"
+                echo -e "${YELLOW}配置IPv6->IPv4转发 (通过NAT64)${NC}"
                 manage_nat64
+                # Jool会自动处理NAT64转换，我们只需要普通的DNAT
+                TARGET_ADDR="[$NAT64_PREFIX$(echo $TARGET_IP | tr '.' ':')]"
             else
                 TARGET_ADDR="[$TARGET_IP]"
             fi
-            
+
             ip6tables -t nat -A PREROUTING -p $PROTO --dport $LOCAL_PORT \
                 -j DNAT --to-destination $TARGET_ADDR:$TARGET_PORT \
                 -m comment --comment "$SCRIPT_TAG"
-                
+
             ip6tables -t nat -A POSTROUTING -p $PROTO -d $TARGET_ADDR --dport $TARGET_PORT \
                 -j MASQUERADE -m comment --comment "$SCRIPT_TAG"
-                
+
             ip6tables -A FORWARD -p $PROTO -d $TARGET_ADDR --dport $TARGET_PORT \
                 -j ACCEPT -m comment --comment "$SCRIPT_TAG"
         }
@@ -283,8 +311,8 @@ add_single_port_forward() {
 }
 
 # 添加端口段转发
-add_port_range_forward() {
-    get_listen_ip
+addportrange_forward() {
+    getlistenip
     read -p "请输入本机起始端口: " LOCAL_START
     read -p "请输入本机结束端口: " LOCAL_END
     read -p "请输入目标服务器IP: " TARGET_IP
@@ -325,44 +353,44 @@ add_port_range_forward() {
         [ -n "$IPV4_LISTEN" ] && {
             if is_ipv6 "$TARGET_IP"; then
                 TARGET_ADDR="[$TARGET_IP]"
-                echo -e "${YELLOW}配置NAT46转发: IPv4->IPv6${NC}"
+                echo -e "${YELLOW}配置IPv4->IPv6转发${NC}"
             else
                 TARGET_ADDR="$TARGET_IP"
             fi
-            
+
             iptables -t nat -A PREROUTING -p $PROTO --dport $LOCAL_START:$LOCAL_END \
                 -j DNAT --to-destination $TARGET_ADDR:$TARGET_START-$TARGET_END \
                 -m comment --comment "$SCRIPT_TAG"
-                
+
             iptables -t nat -A POSTROUTING -p $PROTO -d $TARGET_ADDR --dport $TARGET_START:$TARGET_END \
                 -j MASQUERADE -m comment --comment "$SCRIPT_TAG"
-                
+
             iptables -A FORWARD -p $PROTO -d $TARGET_ADDR --dport $TARGET_START:$TARGET_END \
                 -j ACCEPT -m comment --comment "$SCRIPT_TAG"
-                
+
             # 添加UFW规则
             for ((port=LOCAL_START; port<=LOCAL_END; port++)); do
-                manage_ufw_rule add $port $PROTO
+                manageufwrule add $port $PROTO
             done
         }
 
         # IPv6规则
-        [ -n "$IPV6_LISTEN" ] && has_usable_ipv6 && {
+        [ -n "$IPV6_LISTEN" ] && hasusableipv6 && {
             if is_ipv4 "$TARGET_IP"; then
-                TARGET_ADDR=$(ipv4_to_nat64 "$TARGET_IP")
-                echo -e "${YELLOW}配置NAT64转发: IPv6->IPv4${NC}"
+                echo -e "${YELLOW}配置IPv6->IPv4转发 (通过NAT64)${NC}"
                 manage_nat64
+                TARGET_ADDR="[$NAT64_PREFIX$(echo $TARGET_IP | tr '.' ':')]"
             else
                 TARGET_ADDR="[$TARGET_IP]"
             fi
-            
+
             ip6tables -t nat -A PREROUTING -p $PROTO --dport $LOCAL_START:$LOCAL_END \
                 -j DNAT --to-destination $TARGET_ADDR:$TARGET_START-$TARGET_END \
                 -m comment --comment "$SCRIPT_TAG"
-                
+
             ip6tables -t nat -A POSTROUTING -p $PROTO -d $TARGET_ADDR --dport $TARGET_START:$TARGET_END \
                 -j MASQUERADE -m comment --comment "$SCRIPT_TAG"
-                
+
             ip6tables -A FORWARD -p $PROTO -d $TARGET_ADDR --dport $TARGET_START:$TARGET_END \
                 -j ACCEPT -m comment --comment "$SCRIPT_TAG"
         }
@@ -376,7 +404,7 @@ add_port_range_forward() {
 }
 
 # 删除指定规则
-delete_specific_rule() {
+deletespecificrule() {
     echo -e "${YELLOW}当前转发规则:${NC}"
     local rules=() i=1
     while read -r line; do
@@ -396,7 +424,7 @@ delete_specific_rule() {
     if [[ $rule =~ --dport[[:space:]]+([0-9]+) ]]; then
         local port=${BASH_REMATCH[1]}
         local proto=$(grep -oP '(?<=-p )\w+' <<< "$rule")
-        manage_ufw_rule del $port $proto
+        manageufwrule del $port $proto
     fi
 
     eval "$(sed 's/^/-D /' <<< "$rule")" && \
@@ -422,19 +450,19 @@ check_root
 install_dependencies
 manage_nat64
 sysctl -w net.ipv4.ip_forward=1 >/dev/null
-has_usable_ipv6 && sysctl -w net.ipv6.conf.all.forwarding=1 >/dev/null
+hasusableipv6 && sysctl -w net.ipv6.conf.all.forwarding=1 >/dev/null
 
 # 主循环
 while true; do
     show_menu
     read -p "请选择操作: " choice
     case $choice in
-        1) add_single_port_forward ;;
-        2) add_port_range_forward ;;
-        3) delete_specific_rule ;;
+        1) addsingleport_forward ;;
+        2) addportrange_forward ;;
+        3) deletespecificrule ;;
         4) manage_rules list | less ;;
-        5) sync_ufw_rules ;;
-        6) manage_rules delete; rm -f "$RULES_FILE" "$SERVICE_FILE" ;;
+        5) syncufwrules ;;
+        6) manage_rules delete; rm -f "$RULESFILE" "$SERVICE_FILE" ;;
         0) echo -e "${GREEN}退出脚本${NC}"; exit 0 ;;
         *) echo -e "${RED}无效选项${NC}" ;;
     esac
