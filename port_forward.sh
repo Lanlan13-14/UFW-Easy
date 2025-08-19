@@ -2,7 +2,6 @@
 SCRIPT_TAG="PortForwardScript"
 RULESFILE="/etc/portforward_rules.sh"
 SERVICE_FILE="/etc/systemd/system/portforward.service"
-NAT64_PREFIX="64:ff9b::"
 
 # 颜色定义
 RED='\033[0;31m'
@@ -22,47 +21,11 @@ install_dependencies() {
     if command -v apt >/dev/null 2>&1; then
         sudo apt update
         sudo apt install -y $pkgs
-        # 添加Jool仓库
-        if ! grep -q "jool" /etc/apt/sources.list.d/*; then
-            echo "deb [arch=amd64] https://download.opensuse.org/repositories/home:/nicmx/xUbuntu_$(lsb_release -rs)/ /" | sudo tee /etc/apt/sources.list.d/home:nicmx.list
-            curl -fsSL "https://download.opensuse.org/repositories/home:nicmx/xUbuntu_$(lsb_release -rs)/Release.key" | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/home_nicmx.gpg >/dev/null
-            sudo apt update
-        fi
-        sudo apt install -y jool-tools
     elif command -v yum >/dev/null 2>&1; then
         sudo yum install -y $pkgs
-        # 对于CentOS/RHEL，需要手动安装Jool
-        if ! yum list installed jool >/dev/null 2>&1; then
-            echo -e "${YELLOW}请手动安装Jool，参考: https://www.jool.mx/install.html${NC}"
-        fi
     else
         echo -e "${RED}不支持的包管理器，请手动安装依赖${NC}"
         return 1
-    fi
-}
-
-# NAT64模块管理
-manage_nat64() {
-    # 检查并安装Jool
-    if ! command -v jool >/dev/null 2>&1 && hasusableipv6; then
-        echo -e "${YELLOW}正在配置NAT64/NAT46支持...${NC}"
-        install_dependencies
-        
-        # 加载Jool模块
-        modprobe jool
-        echo "jool" > /etc/modules-load.d/jool.conf
-        
-        # 配置NAT64池
-        jool instance add "default" --netfilter --pool6 ${NAT64_PREFIX}/96
-        jool global update pmtudisc on
-        
-        # 持久化配置
-        cat > /etc/jool.conf <<EOF
-instance add "default" --netfilter --pool6 ${NAT64_PREFIX}/96
-global update pmtudisc on
-EOF
-        echo "jool instance add \"default\" --netfilter --pool6 ${NAT64_PREFIX}/96" >> "$RULESFILE"
-        echo "jool global update pmtudisc on" >> "$RULESFILE"
     fi
 }
 
@@ -76,7 +39,6 @@ hasusableipv6() {
 # 地址处理函数
 is_ipv4() { [[ $1 =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; }
 is_ipv6() { [[ $1 =~ : ]]; }
-ipv4tonat64() { echo "${NAT64_PREFIX}$(echo $1 | sed 's/\./:/g')"; }
 
 # 协议选择
 select_protocol() {
@@ -197,7 +159,6 @@ save_rules() {
     echo "#!/bin/bash" > "$RULESFILE"
     echo "# 自动生成的端口转发规则" >> "$RULESFILE"
     echo "SCRIPT_TAG=\"$SCRIPT_TAG\"" >> "$RULESFILE"
-    echo "NAT64_PREFIX=\"$NAT64_PREFIX\"" >> "$RULESFILE"
     echo >> "$RULESFILE"
 
     # 系统配置
@@ -205,15 +166,6 @@ save_rules() {
     echo "sysctl -w net.ipv4.ip_forward=1" >> "$RULESFILE"
     echo "sysctl -w net.ipv6.conf.all.forwarding=1" >> "$RULESFILE"
     echo >> "$RULESFILE"
-
-    # Jool配置
-    if hasusableipv6 && command -v jool >/dev/null 2>&1; then
-        echo "# Jool NAT64配置" >> "$RULESFILE"
-        echo "modprobe jool" >> "$RULESFILE"
-        echo "jool instance add \"default\" --netfilter --pool6 ${NAT64_PREFIX}/96" >> "$RULESFILE"
-        echo "jool global update pmtudisc on" >> "$RULESFILE"
-        echo >> "$RULESFILE"
-    fi
 
     # 规则配置
     echo "# 转发规则" >> "$RULESFILE"
@@ -283,10 +235,8 @@ addsingleport_forward() {
         # IPv6规则
         [ -n "$IPV6_LISTEN" ] && hasusableipv6 && {
             if is_ipv4 "$TARGET_IP"; then
-                echo -e "${YELLOW}配置IPv6->IPv4转发 (通过NAT64)${NC}"
-                manage_nat64
-                # Jool会自动处理NAT64转换，我们只需要普通的DNAT
-                TARGET_ADDR="[$NAT64_PREFIX$(echo $TARGET_IP | tr '.' ':')]"
+                echo -e "${RED}警告：不支持IPv6到IPv4的转发(已跳过)${NC}"
+                continue
             else
                 TARGET_ADDR="[$TARGET_IP]"
             fi
@@ -377,9 +327,8 @@ addportrange_forward() {
         # IPv6规则
         [ -n "$IPV6_LISTEN" ] && hasusableipv6 && {
             if is_ipv4 "$TARGET_IP"; then
-                echo -e "${YELLOW}配置IPv6->IPv4转发 (通过NAT64)${NC}"
-                manage_nat64
-                TARGET_ADDR="[$NAT64_PREFIX$(echo $TARGET_IP | tr '.' ':')]"
+                echo -e "${RED}警告：不支持IPv6到IPv4的转发(已跳过)${NC}"
+                continue
             else
                 TARGET_ADDR="[$TARGET_IP]"
             fi
@@ -448,7 +397,6 @@ show_menu() {
 # 初始化
 check_root
 install_dependencies
-manage_nat64
 sysctl -w net.ipv4.ip_forward=1 >/dev/null
 hasusableipv6 && sysctl -w net.ipv6.conf.all.forwarding=1 >/dev/null
 
