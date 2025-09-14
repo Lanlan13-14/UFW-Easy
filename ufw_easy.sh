@@ -565,6 +565,16 @@ update_script() {
     if [ $? -eq 0 ]; then
         # 设置执行权限
         chmod +x "$CURRENT_SCRIPT"
+
+        # 语法检查
+        bash -n "$CURRENT_SCRIPT"
+        if [ $? -ne 0 ]; then
+            echo "❌ 新脚本语法检查失败，已恢复备份"
+            mv "$BACKUP_FILE" "$CURRENT_SCRIPT"
+            read -n 1 -s -r -p "按任意键返回主菜单..."
+            return
+        fi
+
         echo "✅ 脚本已更新到最新版本"
         echo "⚠️ 请重新运行脚本以使更新生效"
         echo "项目地址: $GITHUB_REPO"
@@ -575,9 +585,12 @@ update_script() {
 
         if [ -z "$restart_choice" ] || [ "$restart_choice" = "y" ] || [ "$restart_choice" = "Y" ]; then
             echo "🔄 重新运行脚本..."
+            rm -f "$BACKUP_FILE"   # ✅ 删除备份
             exec "$CURRENT_SCRIPT"
         else
             echo "ℹ️ 您可以选择稍后手动运行: sudo $CURRENT_SCRIPT"
+            echo "✅ 已删除备份文件: $BACKUP_FILE"
+            rm -f "$BACKUP_FILE"
             exit 0
         fi
     else
